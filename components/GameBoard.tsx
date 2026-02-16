@@ -25,14 +25,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const [emoteMenuOpenId, setEmoteMenuOpenId] = useState<number | null>(null);
 
   // Positions for 6 players in a circle optimized for Mobile & Desktop
-  // Index 0 updated to be higher to avoid overlap with hand cards (bottom-36/60 instead of bottom-16/8)
   const positions = [
-    'bottom-40 md:bottom-60 left-1/2 -translate-x-1/2',
-    'bottom-32 md:bottom-28 right-1 md:right-8',
-    'top-24 md:top-24 right-1 md:right-8',
-    'top-4 md:top-4 left-1/2 -translate-x-1/2',
-    'top-24 md:top-24 left-1 md:left-8',
-    'bottom-32 md:bottom-28 left-1 md:left-8'
+    'bottom-36 md:bottom-60 left-1/2 -translate-x-1/2', // Player 0 (User) - MOVED UP
+    'bottom-28 md:bottom-28 right-2 md:right-8',        // Player 1
+    'top-20 md:top-24 right-2 md:right-8',              // Player 2
+    'top-2 md:top-4 left-1/2 -translate-x-1/2',         // Player 3
+    'top-20 md:top-24 left-2 md:left-8',                // Player 4
+    'bottom-28 md:bottom-28 left-2 md:left-8'           // Player 5
   ];
 
   const handleAvatarClick = (targetId: number) => {
