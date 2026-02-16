@@ -44,6 +44,18 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setEmoteMenuOpenId(targetId);
   };
 
+
+  const renderEmoteContent = (content: string) => {
+    const match = content.match(/^【(.+?)】：(.*)$/);
+    if (!match) return content;
+
+    return (
+      <>
+        <span className="text-red-500 font-bold">【{match[1]}】</span>：{match[2]}
+      </>
+    );
+  };
+
   const sendEmote = (targetId: number, msg: string) => {
     onEmoteSend(targetId, msg);
     setEmoteMenuOpenId(null);
@@ -153,7 +165,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             {/* Emote Bubble */}
             {playerEmote && (
                 <div className="absolute -top-12 md:-top-16 bg-white text-black px-3 py-2 rounded-2xl rounded-bl-none shadow-lg animate-bounce z-50 whitespace-nowrap text-xs md:text-sm font-bold border-2 border-gray-200 max-w-[150px] overflow-hidden text-ellipsis">
-                    {playerEmote.content}
+                    {renderEmoteContent(playerEmote.content)}
                 </div>
             )}
             

@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, render_template, request
-from game_engine import Room, apply_action, create_room, join_room, leave_room, serialize, start_game
+from game_engine import Room, apply_action, create_room, join_room, leave_room, serialize, start_game, swap_seat
 
 app = Flask(__name__)
 rooms: dict[str, Room] = {}
@@ -73,6 +73,19 @@ def api_state(room_id):
     viewer = request.args.get('player_id', default=None, type=int)
     return jsonify(serialize(room, viewer))
 
+
+
+
+@app.post('/api/rooms/<room_id>/swap-seat')
+def api_swap_seat(room_id):
+    room = rooms.get(room_id)
+    if not room:
+        return jsonify({"error": "房间不存在"}), 404
+    body = request.json or {}
+    ok, msg = swap_seat(room, int(body.get('player_id', -1)), int(body.get('target_seat_id', -1)))
+    if not ok:
+        return jsonify({"error": msg}), 400
+    return jsonify({"ok": True})
 
 @app.post('/api/rooms/<room_id>/action')
 def api_action(room_id):

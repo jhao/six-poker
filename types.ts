@@ -60,6 +60,7 @@ export interface Player {
   finishOrder: number | null;
   isReady: boolean; // For lobby
   isConnected: boolean; // For disconnect logic
+  isBot: boolean;
   isAutoPlayed: boolean; // New: If true, the player is being hosted due to timeout
   seatIndex: number; // 0-5
 }
