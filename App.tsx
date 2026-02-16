@@ -5,6 +5,66 @@ import { CardComponent } from './components/CardComponent';
 import { GameBoard } from './components/GameBoard';
 import { CARDS_PER_PLAYER, TOTAL_PLAYERS, TEAM_A_INDICES, LOBBY_MESSAGES, TURN_DURATION } from './constants';
 
+type BackendCard = { id: string; suit?: string; rank?: string; value?: number; is_wild?: boolean };
+type BackendPlayer = { id: number; name: string; team: 'A' | 'B'; hand: BackendCard[]; ready: boolean; is_bot: boolean; finished: boolean };
+type BackendHand = { player_id: number; cards: BackendCard[]; hand_type: 'single' | 'pair' | 'triple' | 'quad'; main_rank: number };
+type BackendRoomState = {
+  room_id: string;
+  password?: string;
+  host_id: number;
+  players: BackendPlayer[];
+  game_status: 'waiting' | 'playing' | 'round_over';
+  turn_index: number;
+  last_hand: BackendHand | null;
+  pass_count: number;
+  winners: number[];
+  logs: string[];
+};
+
+const backendRankToLocal = (rank?: string): Rank => {
+  const map: Record<string, Rank> = {
+    '4': Rank.Four,
+    '5': Rank.Five,
+    '6': Rank.Six,
+    '7': Rank.Seven,
+    '8': Rank.Eight,
+    '9': Rank.Nine,
+    '10': Rank.Ten,
+    J: Rank.Jack,
+    Q: Rank.Queen,
+    K: Rank.King,
+    A: Rank.Ace,
+    '2': Rank.Two,
+    '3': Rank.Three,
+    SJ: Rank.SmallJoker,
+    BJ: Rank.BigJoker,
+  };
+  return map[rank || ''] || Rank.Four;
+};
+
+const backendTypeToLocal = (type?: string): HandType => {
+  const map: Record<string, HandType> = {
+    single: HandType.Single,
+    pair: HandType.Pair,
+    triple: HandType.Triple,
+    quad: HandType.Quad,
+  };
+  return map[type || ''] || HandType.Invalid;
+};
+
+const toLocalCard = (c: BackendCard): Card => {
+  const rank = backendRankToLocal(c.rank);
+  const suit = ((c.suit || '') as Suit) || Suit.None;
+  return {
+    id: c.id,
+    rank,
+    suit,
+    value: typeof c.value === 'number' ? c.value : -1,
+    isWild: Boolean(c.is_wild),
+    isRed: suit === Suit.Hearts || suit === Suit.Diamonds,
+  };
+};
+
 const App: React.FC = () => {
   // Navigation State
   const [view, setView] = useState<ViewState>('home');
@@ -17,11 +77,13 @@ const App: React.FC = () => {
   const [userName, setUserName] = useState<string>('');
   const [showNameModal, setShowNameModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
+  const [hasLocalSave, setHasLocalSave] = useState(false);
   const [userStats, setUserStats] = useState<UserStats>({ 
       singlePlayer: { played: 0, wins: 0 }, 
       multiPlayer: { played: 0, wins: 0 } 
   });
   const [pendingAction, setPendingAction] = useState<'create' | 'join' | 'single' | null>(null);
+  const [pendingSingleMode, setPendingSingleMode] = useState<'prompt' | 'new' | 'load'>('prompt');
 
   // Game Logic State
   const [gameState, setGameState] = useState<GameState>({
@@ -49,8 +111,10 @@ const App: React.FC = () => {
       // Load User Data
       const savedName = localStorage.getItem('za6_username');
       const savedStats = localStorage.getItem('za6_stats');
+      const savedGame = localStorage.getItem('za6_save');
       if (savedName) setUserName(savedName);
       if (savedStats) setUserStats(JSON.parse(savedStats));
+      setHasLocalSave(Boolean(savedGame));
 
       // Check URL for invite
       const params = new URLSearchParams(window.location.search);
@@ -74,6 +138,7 @@ const App: React.FC = () => {
         myPlayerId,
         room
       }));
+      setHasLocalSave(true);
     }
   }, [gameState, view, room, myPlayerId, isSpectator]);
 
@@ -99,127 +164,196 @@ const App: React.FC = () => {
       setShowNameModal(false);
       
       // Execute pending action
-      if (pendingAction === 'single') startSinglePlayer();
+      if (pendingAction === 'single') startSinglePlayer(pendingSingleMode);
       else if (pendingAction === 'create') setView('lobby'); // Go to lobby then click create
       else if (pendingAction === 'join') setView('lobby');
       
+      setPendingSingleMode('prompt');
       setPendingAction(null);
   };
 
-  // --- Network Simulation Helpers ---
+  // --- Network Helpers ---
 
-  const handleCreateRoom = () => {
+  const isOnlineRoom = room?.roomId !== 'LOCAL' && room !== null;
+
+  const apiRequest = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
+      const res = await fetch(path, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined
+      });
+      const data = await res.json();
+      if (!res.ok) {
+          throw new Error(data.error || '请求失败');
+      }
+      return data;
+  }, []);
+
+  const syncFromBackendState = useCallback((state: BackendRoomState) => {
+      const players: Player[] = state.players.map((p, idx) => ({
+          id: p.id,
+          name: p.name,
+          team: p.team,
+          hand: p.hand.map(toLocalCard),
+          isHuman: p.id === myPlayerId,
+          isFinished: p.finished,
+          finishOrder: null,
+          isReady: p.ready,
+          isConnected: true,
+          isAutoPlayed: false,
+          seatIndex: idx
+      }));
+
+      const history: PlayedHand[] = state.last_hand ? [{
+          cards: state.last_hand.cards.map(toLocalCard),
+          type: backendTypeToLocal(state.last_hand.hand_type),
+          mainRankValue: state.last_hand.main_rank,
+          playerId: state.last_hand.player_id,
+          playerName: players[state.last_hand.player_id]?.name || '未知玩家',
+          playerTeam: players[state.last_hand.player_id]?.team || 'A'
+      }] : [];
+
+      setRoom({
+          roomId: state.room_id,
+          password: room?.password,
+          hostId: state.host_id,
+          isStarted: state.game_status !== 'waiting',
+          players,
+      });
+
+      setGameState(prev => ({
+          ...prev,
+          players,
+          currentTurnIndex: state.turn_index,
+          handHistory: history,
+          passCount: state.pass_count,
+          winners: state.winners.map(pid => players[pid]?.name || `玩家${pid + 1}`),
+          logs: state.logs,
+          gameStatus: state.game_status === 'round_over' ? 'roundOver' : state.game_status,
+          turnTimeLeft: prev.turnTimeLeft
+      }));
+
+      if (state.game_status === 'waiting') setView('room_waiting');
+      else setView('game');
+  }, [myPlayerId, room?.password]);
+
+  const handleCreateRoom = async () => {
     if (!userName) {
         setPendingAction('create');
         setShowNameModal(true);
         return;
     }
 
-    const newRoom: RoomInfo = {
-      roomId: Math.floor(1000 + Math.random() * 9000).toString(),
-      password: Math.floor(1000 + Math.random() * 9000).toString(),
-      hostId: 0,
-      isStarted: false,
-      players: Array(6).fill(null).map((_, i) => ({
-        id: i,
-        name: i === 0 ? userName : `空位 ${i+1}`,
-        team: TEAM_A_INDICES.includes(i) ? 'A' : 'B',
-        hand: [],
-        isHuman: false, 
-        isFinished: false,
-        finishOrder: null,
-        isReady: false, // Host not ready by default
-        isConnected: true,
-        isAutoPlayed: false,
-        seatIndex: i
-      }))
-    };
-    setRoom(newRoom);
-    setMyPlayerId(0);
-    setIsSpectator(false);
-    setView('room_waiting');
+    try {
+      const data = await apiRequest('/api/rooms', 'POST', { name: userName }) as { room_id: string; password: string; player_id: number };
+      setMyPlayerId(data.player_id);
+      setIsSpectator(false);
+      setRoom({
+        roomId: data.room_id,
+        password: data.password,
+        hostId: data.player_id,
+        isStarted: false,
+        players: Array(6).fill(null).map((_, i) => ({
+          id: i,
+          name: `玩家 ${i + 1}`,
+          team: TEAM_A_INDICES.includes(i) ? 'A' : 'B',
+          hand: [],
+          isHuman: i === data.player_id,
+          isFinished: false,
+          finishOrder: null,
+          isReady: false,
+          isConnected: true,
+          isAutoPlayed: false,
+          seatIndex: i
+        }))
+      });
+      setInputRoomId(data.room_id);
+      setInputPassword(data.password);
+      setView('room_waiting');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '创建房间失败');
+    }
   };
 
-  const handleJoinRoom = () => {
+  const handleJoinRoom = async () => {
     if (!userName) {
         setPendingAction('join');
         setShowNameModal(true);
         return;
     }
     if (inputRoomId.length !== 4) {
-      alert("请输入4位房间号 (模拟)");
+      alert('请输入4位房间号');
       return;
     }
 
-    // Check if user has left this room before (Spectator Logic)
-    const spectateList = JSON.parse(localStorage.getItem('za6_spectate_list') || '[]');
-    const previouslyLeft = spectateList.includes(inputRoomId);
-
-    // Simulate finding a room
-    // Mock logic: If input ID is "9999", simulate an "Already Started" room
-    const isMockStarted = inputRoomId === '9999'; 
-
-    const mockRoom: RoomInfo = {
-      roomId: inputRoomId,
-      hostId: 0,
-      isStarted: isMockStarted,
-      players: Array(6).fill(null).map((_, i) => ({
-        id: i,
-        name: `玩家 ${i+1}`,
-        team: TEAM_A_INDICES.includes(i) ? 'A' : 'B',
-        hand: [],
-        isHuman: false,
-        isFinished: false,
-        finishOrder: null,
-        isReady: true,
-        isConnected: true,
-        isAutoPlayed: false,
-        seatIndex: i
-      }))
-    };
-    
-    if (previouslyLeft || isMockStarted) {
-        setIsSpectator(true);
-        alert(previouslyLeft ? "你之前退出了该房间，现在进入观战模式。" : "游戏已开始，进入观战模式。");
-        setMyPlayerId(0); // Watch from perspective of P0
-        mockRoom.isStarted = true;
-    } else {
-        setIsSpectator(false);
-        // Find an empty seat
-        const mySeat = 1; 
-        mockRoom.players[mySeat] = {
-            ...mockRoom.players[mySeat],
-            name: userName, // Use real name
-            isHuman: true,
-            isReady: false
-        };
-        setMyPlayerId(mySeat);
+    try {
+      const data = await apiRequest(`/api/rooms/${inputRoomId}/join`, 'POST', { name: userName, password: inputPassword }) as { player_id: number };
+      setMyPlayerId(data.player_id);
+      setIsSpectator(false);
+      setRoom({
+        roomId: inputRoomId,
+        hostId: 0,
+        password: inputPassword || undefined,
+        isStarted: false,
+        players: Array(6).fill(null).map((_, i) => ({
+          id: i,
+          name: `玩家 ${i + 1}`,
+          team: TEAM_A_INDICES.includes(i) ? 'A' : 'B',
+          hand: [],
+          isHuman: i === data.player_id,
+          isFinished: false,
+          finishOrder: null,
+          isReady: false,
+          isConnected: true,
+          isAutoPlayed: false,
+          seatIndex: i
+        }))
+      });
+      setView('room_waiting');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '加入房间失败');
     }
-
-    setRoom(mockRoom);
-    setView('room_waiting');
   };
 
   const copyInviteLink = () => {
       if (!room) return;
       const url = `${window.location.origin}?room=${room.roomId}`;
       navigator.clipboard.writeText(url).then(() => {
-          alert(`邀请链接已复制：\n${url}\n\n对方进入需要输入密码：${room.password}`);
+          alert(`邀请链接已复制：
+${url}
+
+对方进入需要输入密码：${room.password}`);
       });
   };
 
   const copyRoomInfo = () => {
       if (!room || room.roomId === 'LOCAL') return;
       const url = `${window.location.origin}?room=${room.roomId}`;
-      const info = `房间号: ${room.roomId}\n密码: ${room.password || '无'}\n加入链接: ${url}`;
+      const info = `房间号: ${room.roomId}
+密码: ${room.password || '无'}
+加入链接: ${url}`;
       navigator.clipboard.writeText(info).then(() => {
-          alert("房间信息已复制！");
+          alert('房间信息已复制！');
       });
   };
 
-  const toggleReady = () => {
+  const toggleReady = async () => {
     if (!room || isSpectator) return;
-    const updatedPlayers = room.players.map(p => 
+
+    if (room.roomId !== 'LOCAL') {
+        try {
+            const me = room.players[myPlayerId];
+            await apiRequest(`/api/rooms/${room.roomId}/ready`, 'POST', {
+                player_id: myPlayerId,
+                ready: !me?.isReady
+            });
+        } catch (error) {
+            alert(error instanceof Error ? error.message : '准备状态更新失败');
+        }
+        return;
+    }
+
+    const updatedPlayers = room.players.map(p =>
       p.id === myPlayerId ? { ...p, isReady: !p.isReady } : p
     );
     setRoom({ ...room, players: updatedPlayers });
@@ -247,13 +381,22 @@ const App: React.FC = () => {
       }, 3000);
   };
 
-  const startGame = useCallback(() => {
+  const startGame = useCallback(async () => {
     if (!room) return;
-    
+
+    if (room.roomId !== 'LOCAL') {
+      try {
+        await apiRequest(`/api/rooms/${room.roomId}/start`, 'POST', {});
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '开始失败');
+      }
+      return;
+    }
+
     // Check if everyone is ready
     const allReady = room.players.every(p => !p.isHuman || p.isReady); // Simple check: Humans must be ready
     if (!allReady) {
-        alert("还有玩家未准备，无法开始！");
+        alert('还有玩家未准备，无法开始！');
         return;
     }
 
@@ -262,10 +405,10 @@ const App: React.FC = () => {
     let deck = shuffleDeck(createDeck());
     const players: Player[] = room.players.map(p => ({
         ...p,
-        hand: [], 
+        hand: [],
         isFinished: false,
         finishOrder: null,
-        isHuman: p.id === myPlayerId && p.isConnected && !isSpectator, 
+        isHuman: p.id === myPlayerId && p.isConnected && !isSpectator,
         isAutoPlayed: false
     }));
 
@@ -295,7 +438,8 @@ const App: React.FC = () => {
     });
     setSelectedCards([]);
     setView('game');
-  }, [room, myPlayerId, isSpectator]);
+  }, [room, myPlayerId, isSpectator, apiRequest]);
+
 
 
   // --- Game Logic ---
@@ -504,15 +648,29 @@ const App: React.FC = () => {
     });
   };
 
-  const handleUserPlay = () => {
+  const handleUserPlay = async () => {
     if (selectedCards.length === 0) return;
-    const analysis = analyzeHand(selectedCards);
-    if (analysis.type === HandType.Invalid) {
-      alert("无效的牌型组合！");
+
+    if (isOnlineRoom && room) {
+      try {
+        await apiRequest(`/api/rooms/${room.roomId}/action`, 'POST', {
+          player_id: myPlayerId,
+          action: 'play',
+          card_ids: selectedCards.map(card => card.id)
+        });
+        setSelectedCards([]);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '出牌失败');
+      }
       return;
     }
-    
-    // Check validity against history
+
+    const analysis = analyzeHand(selectedCards);
+    if (analysis.type === HandType.Invalid) {
+      alert('无效的牌型组合！');
+      return;
+    }
+
     const activePlayersCount = gameState.players.filter(p => !p.isFinished).length;
     let threshold = activePlayersCount - 1;
     if (gameState.handHistory.length > 0) {
@@ -521,21 +679,33 @@ const App: React.FC = () => {
             threshold = activePlayersCount;
         }
     }
-    
+
     const isFreeTurn = gameState.handHistory.length === 0 || gameState.passCount >= threshold;
     const effectiveLastHand = isFreeTurn ? null : gameState.handHistory[gameState.handHistory.length - 1];
 
-    if (effectiveLastHand) {
-      if (!canBeat(selectedCards, effectiveLastHand)) {
-        alert("你的牌必须大于上家且牌型一致！");
-        return;
-      }
+    if (effectiveLastHand && !canBeat(selectedCards, effectiveLastHand)) {
+      alert('你的牌必须大于上家且牌型一致！');
+      return;
     }
     playCards(myPlayerId, selectedCards);
     setSelectedCards([]);
   };
 
-  const handleUserPass = () => {
+  const handleUserPass = async () => {
+    if (isOnlineRoom && room) {
+      try {
+        await apiRequest(`/api/rooms/${room.roomId}/action`, 'POST', {
+          player_id: myPlayerId,
+          action: 'pass',
+          card_ids: []
+        });
+        setSelectedCards([]);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '过牌失败');
+      }
+      return;
+    }
+
     const activePlayersCount = gameState.players.filter(p => !p.isFinished).length;
     let threshold = activePlayersCount - 1;
     if (gameState.handHistory.length > 0) {
@@ -547,12 +717,13 @@ const App: React.FC = () => {
     const isFreeTurn = gameState.handHistory.length === 0 || gameState.passCount >= threshold;
 
     if (isFreeTurn) {
-      alert("新的一轮，你必须出牌，不能过！");
+      alert('新的一轮，你必须出牌，不能过！');
       return;
     }
     passTurn(myPlayerId);
     setSelectedCards([]);
   };
+
 
   const handleLeaveGame = (force: boolean = false) => {
       if (room?.roomId === 'LOCAL') {
@@ -595,9 +766,34 @@ const App: React.FC = () => {
 
   // --- Effects ---
 
+  // Online room polling
+  useEffect(() => {
+    if (!room || room.roomId === 'LOCAL') return;
+
+    let active = true;
+    const tick = async () => {
+      try {
+        const state = await apiRequest(`/api/rooms/${room.roomId}/state?player_id=${myPlayerId}`) as BackendRoomState;
+        if (!active) return;
+        syncFromBackendState(state);
+      } catch (error) {
+        if (active) {
+          console.error(error);
+        }
+      }
+    };
+
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [room?.roomId, myPlayerId, apiRequest, syncFromBackendState]);
+
   // Timer Effect & Timeout AutoPlay Logic
   useEffect(() => {
-    if (gameState.gameStatus === 'playing') {
+    if (gameState.gameStatus === 'playing' && room?.roomId === 'LOCAL') {
       const timer = setInterval(() => {
         setGameState(prev => {
           // If time runs out
@@ -622,7 +818,7 @@ const App: React.FC = () => {
 
   // Turn Handling Effect
   useEffect(() => {
-    if (gameState.gameStatus === 'playing') {
+    if (gameState.gameStatus === 'playing' && room?.roomId === 'LOCAL') {
       // Logic triggers if it's not a human turn OR if time runs out
       const currentPlayer = gameState.players[gameState.currentTurnIndex];
       const isAuto = currentPlayer.id === myPlayerId && currentPlayer.isAutoPlayed;
@@ -701,19 +897,33 @@ const App: React.FC = () => {
   const isUserTurn = gameState.currentTurnIndex === myPlayerId && gameState.gameStatus === 'playing' && !gameState.players[myPlayerId].isFinished && !isSpectator && !isAuto;
 
 
-  const requestSinglePlayer = () => {
+  const requestSinglePlayer = (mode: 'prompt' | 'new' | 'load' = 'prompt') => {
       if (!userName) {
+          setPendingSingleMode(mode);
           setPendingAction('single');
           setShowNameModal(true);
           return;
       }
-      startSinglePlayer();
+      startSinglePlayer(mode);
   };
 
-  const startSinglePlayer = () => {
+  const startSinglePlayer = (mode: 'prompt' | 'new' | 'load' = 'prompt') => {
       // Check for save
       const saveStr = localStorage.getItem('za6_save');
-      if (saveStr) {
+      if (mode === 'load' && saveStr) {
+          const save = JSON.parse(saveStr);
+          setRoom(save.room);
+          setGameState(save.gameState);
+          setMyPlayerId(save.myPlayerId);
+          setIsSpectator(false);
+          setView('game');
+          return;
+      }
+
+      if (mode === 'new') {
+          localStorage.removeItem('za6_save');
+          setHasLocalSave(false);
+      } else if (saveStr) {
           const confirmLoad = window.confirm("发现未完成的单机游戏，是否继续？(取消则开始新游戏)");
           if (confirmLoad) {
               const save = JSON.parse(saveStr);
@@ -725,6 +935,7 @@ const App: React.FC = () => {
               return;
           } else {
               localStorage.removeItem('za6_save');
+              setHasLocalSave(false);
           }
       }
 
@@ -854,6 +1065,19 @@ const App: React.FC = () => {
                       线上联机
                   </button>
               </div>
+              {hasLocalSave && (
+                  <div className="mb-8 text-sm text-center text-gray-300 bg-slate-800/90 border border-slate-700 rounded-xl p-3">
+                      <div className="mb-2">检测到未完成的单机存档</div>
+                      <div className="flex gap-2 justify-center">
+                          <button onClick={() => requestSinglePlayer('load')} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 rounded font-semibold">
+                              继续上局
+                          </button>
+                          <button onClick={() => requestSinglePlayer('new')} className="px-3 py-1 bg-slate-600 hover:bg-slate-500 rounded font-semibold">
+                              开新对局
+                          </button>
+                      </div>
+                  </div>
+              )}
               <button onClick={() => setShowStatsModal(true)} className="text-gray-400 hover:text-white flex items-center gap-2 px-4 py-2 border border-gray-700 rounded-full hover:bg-slate-800 transition-colors">
                   <span className="text-xl">📊</span> 我的信息
               </button>
