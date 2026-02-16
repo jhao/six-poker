@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Player, PlayedHand, EmoteMessage } from '../types';
 import { CardComponent } from './CardComponent';
-import { TEAM_A_INDICES, EMOTE_LIST } from '../constants';
+import { EMOTE_LIST } from '../constants';
 
 interface GameBoardProps {
   players: Player[];
@@ -154,7 +154,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       {/* --- PLAYERS --- */}
       {players.map((p, idx) => {
         const isCurrentTurn = idx === currentTurnIndex;
-        const isTeammate = TEAM_A_INDICES.includes(myPlayerId) === TEAM_A_INDICES.includes(p.id);
         const playerEmote = activeEmotes.find(e => e.senderId === p.id);
         
         return (
@@ -164,7 +163,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           >
             {/* Emote Bubble */}
             {playerEmote && (
-                <div className="absolute -top-12 md:-top-16 bg-white text-black px-3 py-2 rounded-2xl rounded-bl-none shadow-lg animate-bounce z-50 whitespace-nowrap text-xs md:text-sm font-bold border-2 border-gray-200 max-w-[150px] overflow-hidden text-ellipsis">
+                <div className="absolute -top-14 md:-top-20 bg-white text-black px-3 py-2 rounded-2xl rounded-bl-none shadow-lg animate-bounce z-50 text-xs md:text-sm font-bold border-2 border-gray-200 max-w-[220px] whitespace-normal break-words leading-snug">
                     {renderEmoteContent(playerEmote.content)}
                 </div>
             )}
@@ -189,13 +188,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
                 <div className={`
                     w-7 h-7 md:w-12 md:h-12 rounded-full flex items-center justify-center font-bold text-xs md:text-lg border-2 shadow-inner
-                    ${isTeammate ? 'bg-blue-600 border-blue-400' : 'bg-red-600 border-red-400'}
+                    ${p.team === 'A' ? 'bg-blue-600 border-blue-400' : 'bg-red-600 border-red-400'}
                     ${p.isFinished ? 'bg-gradient-to-br from-yellow-300 to-yellow-600 border-white' : ''}
                 `}>
                     {p.isFinished ? '🏆' : p.name.charAt(0)}
                 </div>
                 
-                <div className="mt-1 text-[10px] md:text-xs font-bold text-white shadow-black drop-shadow-md text-center leading-tight max-w-[68px] md:max-w-[100px] truncate">
+                <div className={`mt-1 text-[10px] md:text-xs font-bold text-white shadow-black drop-shadow-md text-center leading-tight max-w-[88px] md:max-w-[120px] px-1 rounded ${p.team === 'A' ? 'bg-blue-900/60' : 'bg-red-900/60'}`}>
                     {p.name} {p.isFinished && `(#${p.finishOrder})`}
                     {!p.isConnected && <span className="block text-[8px] text-red-300">(掉线)</span>}
                 </div>
