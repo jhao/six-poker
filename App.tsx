@@ -202,6 +202,7 @@ const App: React.FC = () => {
           finishOrder: null,
           isReady: p.ready,
           isConnected: true,
+          isBot: p.is_bot,
           isAutoPlayed: false,
           seatIndex: idx
       }));
@@ -270,6 +271,7 @@ const App: React.FC = () => {
           finishOrder: null,
           isReady: false,
           isConnected: true,
+          isBot: i !== data.player_id,
           isAutoPlayed: false,
           seatIndex: i
         }))
@@ -312,6 +314,7 @@ const App: React.FC = () => {
           finishOrder: null,
           isReady: false,
           isConnected: true,
+          isBot: i !== data.player_id,
           isAutoPlayed: false,
           seatIndex: i
         }))
@@ -369,6 +372,26 @@ ${url}
     setRoom({ ...room, players: updatedPlayers });
   };
 
+
+
+  const handleSwapSeat = async (targetSeatId: number) => {
+    if (!room || isSpectator || room.roomId === 'LOCAL') return;
+    if (targetSeatId === myPlayerId) return;
+
+    const targetPlayer = room.players[targetSeatId];
+    if (!targetPlayer?.isBot) return;
+
+    try {
+      await apiRequest(`/api/rooms/${room.roomId}/swap-seat`, 'POST', {
+        player_id: myPlayerId,
+        target_seat_id: targetSeatId
+      });
+      setMyPlayerId(targetSeatId);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '换座失败');
+    }
+  };
+
   const sendLobbyMessage = (msg: string) => {
       // Simulate receiving a message in lobby
       const emote: EmoteMessage = {
@@ -419,6 +442,7 @@ ${url}
         isFinished: false,
         finishOrder: null,
         isHuman: p.id === myPlayerId && p.isConnected && !isSpectator,
+        isBot: p.isBot,
         isAutoPlayed: false
     }));
 
@@ -638,7 +662,8 @@ ${url}
       const emote: EmoteMessage = {
           senderId: myPlayerId,
           targetId,
-          content: `${senderName}向${targetName}发送的：${content}`,
+          content: `【${senderName}向${targetName}发送的】：${content}`,
+          
           timestamp: Date.now()
       };
       setGameState(prev => ({
@@ -971,6 +996,7 @@ ${url}
             finishOrder: null,
             isReady: true,
             isConnected: true,
+            isBot: i !== 0,
             isAutoPlayed: false,
             seatIndex: i
           }))
@@ -990,7 +1016,7 @@ ${url}
       if (pid === myPlayerId) return;
       setGameState(prev => ({
           ...prev,
-          players: prev.players.map(p => p.id === pid ? { ...p, isConnected: !p.isConnected, isHuman: false } : p),
+          players: prev.players.map(p => p.id === pid ? { ...p, isConnected: !p.isConnected, isHuman: false, isBot: p.isConnected } : p),
           logs: [`系统: ${prev.players[pid].name} ${prev.players[pid].isConnected ? '断开连接，电脑托管' : '重新连接'}`, ...prev.logs]
       }));
   };
@@ -1167,10 +1193,16 @@ ${url}
                       // Find active emote for this player in waiting room
                       const pEmote = gameState.activeEmotes.find(e => e.senderId === p.id);
                       return (
-                          <div key={i} className={`
+                          <button
+                              key={i}
+                              onClick={() => handleSwapSeat(p.id)}
+                              disabled={isSpectator || !p.isBot || p.id === myPlayerId}
+                              className={`
                               w-20 h-28 md:w-24 md:h-32 rounded-lg border-2 flex flex-col items-center justify-center relative transition-all
                               ${p.team === 'A' ? 'border-blue-500/30 bg-blue-900/20' : 'border-red-500/30 bg-red-900/20'}
                               ${p.id === myPlayerId ? 'ring-2 ring-yellow-400' : ''}
+                              ${!isSpectator && p.isBot && p.id !== myPlayerId ? 'cursor-pointer hover:scale-105 hover:border-yellow-300' : ''}
+                              ${isSpectator || !p.isBot || p.id === myPlayerId ? 'cursor-default' : ''}
                           `}>
                               {pEmote && (
                                   <div className="absolute -top-10 bg-white text-black text-xs px-2 py-1 rounded-lg shadow-lg whitespace-nowrap z-10 animate-bounce">
@@ -1184,7 +1216,10 @@ ${url}
                               <span className="text-[10px] text-gray-400">{p.team === 'A' ? 'A队' : 'B队'}</span>
                               
                               {p.isReady && <span className="absolute top-2 right-2 text-green-400 text-xs">✔</span>}
-                          </div>
+                          {p.isBot && !isSpectator && p.id !== myPlayerId && (
+                                  <span className="absolute bottom-1 text-[9px] text-yellow-300">点击换到此位</span>
+                              )}
+                          </button>
                       );
                   })}
               </div>
@@ -1222,7 +1257,7 @@ ${url}
                       </button>
                   )}
                   
-                  <button onClick={() => setView('home')} className="px-6 py-3 bg-red-800 rounded-xl text-sm hover:bg-red-700">
+                  <button onClick={() => handleLeaveGame(true)} className="px-6 py-3 bg-red-800 rounded-xl text-sm hover:bg-red-700">
                       离开
                   </button>
               </div>

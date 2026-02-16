@@ -207,6 +207,34 @@ def leave_room(room: Room, player_id: int):
     return True, "ok"
 
 
+
+def swap_seat(room: Room, player_id: int, target_seat_id: int):
+    if room.game_status != "waiting":
+        return False, "仅可在等待阶段换座"
+    if player_id < 0 or player_id >= len(room.players):
+        return False, "玩家不存在"
+    if target_seat_id < 0 or target_seat_id >= len(room.players):
+        return False, "目标座位不存在"
+
+    player = room.players[player_id]
+    target = room.players[target_seat_id]
+
+    if player.is_bot:
+        return False, "电脑座位不能换座"
+    if not target.is_bot:
+        return False, "该座位已有玩家"
+
+    room.players[player_id], room.players[target_seat_id] = room.players[target_seat_id], room.players[player_id]
+    room.players[player_id].id = player_id
+    room.players[target_seat_id].id = target_seat_id
+
+    if room.host_id == player_id:
+        room.host_id = target_seat_id
+
+    room.logs.append(f"{player.name} 从 {player_id + 1} 号位换到 {target_seat_id + 1} 号位")
+    room.updated_at = time.time()
+    return True, "ok"
+
 def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[List[str]] = None):
     if room.game_status != "playing":
         return False, "游戏未开始"
