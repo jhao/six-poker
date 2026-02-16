@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Suit } from '../types';
+import { Card, Rank, Suit } from '../types';
 
 interface CardProps {
   card: Card;
@@ -10,7 +10,8 @@ interface CardProps {
 }
 
 export const CardComponent: React.FC<CardProps> = ({ card, onClick, selected, small, hidden }) => {
-  const isRed = card.isRed;
+  const isBigJoker = card.rank === Rank.BigJoker;
+  const isRed = card.isRed || isBigJoker;
   
   // Responsive sizing classes
   // Normal (Player): w-16 h-24 on mobile, w-20 h-28 on desktop

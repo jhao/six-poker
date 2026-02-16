@@ -41,3 +41,4 @@ export const LOBBY_MESSAGES = [
 
 export const MAX_HISTORY_DISPLAY = 6;
 export const TURN_DURATION = 30; // Seconds
+export const HOSTED_TURN_DURATION = 5; // Seconds while hosted/auto-played
