@@ -123,6 +123,7 @@ def _run_bot_turns(room: Room):
         nxt = room.players[room.turn_index]
         if not nxt.is_bot or nxt.finished:
             break
+        time.sleep(1)
         mv = _auto_move(nxt.hand, room.last_hand)
         if mv:
             apply_action(room, nxt.id, "play", [c.id for c in mv])
