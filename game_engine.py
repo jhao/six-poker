@@ -121,15 +121,18 @@ def create_room(name: str) -> Room:
 
 def start_game(room: Room):
     deck = _create_deck()
+    starter = 0
     for p in room.players:
         p.hand = _sort_hand([deck.pop() for _ in range(9)])
         p.finished = False
+        if any(c.suit == '♥' and c.rank == '4' for c in p.hand):
+            starter = p.id
     room.game_status = "playing"
-    room.turn_index = 0
+    room.turn_index = starter
     room.last_hand = None
     room.pass_count = 0
     room.winners = []
-    room.logs.append("游戏开始")
+    room.logs.append(f"游戏开始，{room.players[starter].name} 持有红桃4先手")
 
 
 def serialize(room: Room, viewer_id: Optional[int] = None):
@@ -160,6 +163,8 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
     if cur.id != player_id:
         return False, "还没轮到你"
     if action == "pass":
+        if room.last_hand is None:
+            return False, "新一轮必须出牌"
         room.pass_count += 1
         room.logs.append(f"{cur.name} 过牌")
     else:
@@ -177,13 +182,15 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
             cur.finished = True
             room.winners.append(cur.id)
 
-    alive = [p for p in room.players if not p.finished]
-    if len(alive) <= 1:
+    team_a_finished = sum(1 for p in room.players if p.finished and p.id in TEAM_A)
+    team_b_finished = sum(1 for p in room.players if p.finished and p.id not in TEAM_A)
+    if team_a_finished >= 3 or team_b_finished >= 3:
         room.game_status = "round_over"
-        team_a = sum(1 for w in room.winners if w in TEAM_A)
-        team_b = len(room.winners) - team_a
-        room.logs.append(f"本局结束，A队出完人数 {team_a}，B队出完人数 {team_b}")
+        winner = 'A' if team_a_finished >= 3 else 'B'
+        room.logs.append(f"本局结束，{winner}队全员出完")
         return True, "ok"
+
+    alive = [p for p in room.players if not p.finished]
 
     for _ in range(6):
         room.turn_index = (room.turn_index + 1) % 6

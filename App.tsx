@@ -90,6 +90,7 @@ const App: React.FC = () => {
     players: [],
     currentTurnIndex: -1,
     handHistory: [],
+    tableHistory: [],
     deck: [],
     gameStatus: 'waiting',
     passCount: 0,
@@ -226,6 +227,7 @@ const App: React.FC = () => {
           players,
           currentTurnIndex: state.turn_index,
           handHistory: history,
+          tableHistory: history.slice(-6),
           passCount: state.pass_count,
           winners: state.winners.map(pid => players[pid]?.name || `玩家${pid + 1}`),
           logs: state.logs,
@@ -426,6 +428,7 @@ ${url}
       players,
       currentTurnIndex: starterIndex,
       handHistory: [],
+      tableHistory: [],
       deck,
       gameStatus: 'playing',
       passCount: 0,
@@ -531,6 +534,7 @@ ${url}
       };
 
       const newHistory = [...prev.handHistory, playedHand];
+      const newTableHistory = [...prev.tableHistory, playedHand].slice(-6);
       
       // Update players array
       const newPlayers = prev.players.map(p => p.id === playerId ? { ...p, hand: newHand, isFinished, finishOrder: newFinishOrder } : p);
@@ -543,6 +547,7 @@ ${url}
         ...prev,
         players: newPlayers,
         handHistory: newHistory,
+        tableHistory: newTableHistory,
         currentTurnIndex: nextIndex,
         passCount: 0, // Reset pass count on play
         logs: [`${player.name} 打出了 ${handAnalysis.type}`, ...prev.logs].slice(0, 50),
@@ -839,44 +844,41 @@ ${url}
 
   // Win Condition Effect
   useEffect(() => {
-    // Check if one COMPLETE TEAM has finished
+    // Round ends as soon as all players from one team are finished
     const finishedPlayers = gameState.players.filter(p => p.isFinished);
     const teamAFinishedCount = finishedPlayers.filter(p => p.team === 'A').length;
     const teamBFinishedCount = finishedPlayers.filter(p => p.team === 'B').length;
 
-    if (gameState.gameStatus === 'playing' && (teamAFinishedCount === 3 || teamBFinishedCount === 3)) {
-        // Determine Winner (The team that finished all 3)
-        // If both somehow finish same time (impossible sequentially), prioritize A.
-        const winningTeam = teamAFinishedCount === 3 ? 'A' : 'B';
-        
-        // Find the "Head Winner" for the record (usually first person who went out from winning team)
-        const winningTeamPlayers = finishedPlayers.filter(p => p.team === winningTeam).sort((a,b) => (a.finishOrder || 99) - (b.finishOrder || 99));
-        const headWinnerName = winningTeamPlayers[0]?.name || "Unknown";
+    if (gameState.gameStatus === 'playing' && (teamAFinishedCount >= 3 || teamBFinishedCount >= 3)) {
+        const winningTeam = teamAFinishedCount >= 3 ? 'A' : 'B';
+        const winningTeamPlayers = finishedPlayers
+          .filter(p => p.team === winningTeam)
+          .sort((a,b) => (a.finishOrder || 99) - (b.finishOrder || 99));
+        const headWinnerName = winningTeamPlayers[0]?.name || '未知';
 
         const newScore: ScoreRecord = {
             round: gameState.currentRound,
             winnerTeam: winningTeam,
             teamAScore: winningTeam === 'A' ? 1 : 0,
             teamBScore: winningTeam === 'B' ? 1 : 0,
-            details: `头游: ${headWinnerName} (全队完胜)`
+            details: `头游: ${headWinnerName}（该队全员出完）`
         };
 
-        // Update Stats
         const myPlayer = gameState.players.find(p => p.id === myPlayerId);
         if (myPlayer) {
-            const myTeam = myPlayer.team;
-            const isWin = winningTeam === myTeam;
+            const isWin = winningTeam === myPlayer.team;
             saveStats(isWin, room?.roomId === 'LOCAL');
         }
 
         setGameState(prev => ({
-            ...prev, 
+            ...prev,
             gameStatus: 'roundOver',
-            scores: [...prev.scores, newScore]
+            scores: [...prev.scores, newScore],
+            logs: [`本局结束：${winningTeam}队胜利。`, ...prev.logs].slice(0, 50)
         }));
         setView('score_summary');
     }
-  }, [gameState.players, gameState.gameStatus]);
+  }, [gameState.players, gameState.gameStatus, gameState.currentRound, myPlayerId, room?.roomId]);
 
   // --- Render Helpers ---
 
@@ -978,7 +980,7 @@ ${url}
   };
 
   return (
-    <div className="w-full h-screen bg-slate-900 text-slate-100 font-sans overflow-hidden flex flex-col relative select-none">
+    <div className="w-full min-h-screen bg-slate-900 text-slate-100 font-sans overflow-hidden flex flex-col relative select-none">
       
       {/* Background Pattern */}
       <div className="absolute inset-0 opacity-10 pointer-events-none" style={{backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '30px 30px'}}></div>
@@ -1252,14 +1254,14 @@ ${url}
 
       {/* --- HUD --- */}
       {view === 'game' && (
-        <div className="absolute top-0 left-0 w-full p-2 md:p-4 flex justify-between items-start z-40 pointer-events-none">
+        <div className="absolute top-0 left-0 w-full p-1.5 md:p-4 flex justify-between items-start gap-1 md:gap-4 z-40 pointer-events-none">
             <div className="flex flex-col gap-2 pointer-events-auto">
                 <button onClick={() => handleLeaveGame(false)} className="bg-red-900/80 border border-red-500 text-xs px-2 py-1 rounded hover:bg-red-800 text-white w-fit">
                     退出游戏
                 </button>
                 <div 
                     onClick={copyRoomInfo}
-                    className="bg-black/60 p-2 rounded-lg backdrop-blur-md border border-gray-700 cursor-pointer hover:bg-black/80 transition-colors active:scale-95"
+                    className="bg-black/60 p-1.5 md:p-2 rounded-lg backdrop-blur-md border border-gray-700 cursor-pointer hover:bg-black/80 transition-colors active:scale-95 max-w-[55vw] md:max-w-none"
                 >
                     <div className="flex items-center gap-2 mb-1">
                         <h1 className="text-sm md:text-lg font-bold text-yellow-400">
@@ -1305,7 +1307,7 @@ ${url}
              <GameBoard 
                players={gameState.players} 
                currentTurnIndex={gameState.currentTurnIndex}
-               handHistory={gameState.handHistory}
+               handHistory={gameState.tableHistory}
                activeEmotes={gameState.activeEmotes}
                onEmoteSend={sendEmote}
                myPlayerId={myPlayerId}
@@ -1316,7 +1318,7 @@ ${url}
 
       {/* --- CONTROLS --- */}
       {view === 'game' && gameState.players.length > 0 && !isSpectator && (
-        <div className="absolute bottom-0 left-0 h-32 md:h-48 w-full flex flex-col items-center justify-end pb-2 md:pb-4 z-40 bg-gradient-to-t from-black/90 to-transparent pointer-events-none">
+        <div className="absolute bottom-0 left-0 h-36 md:h-48 w-full flex flex-col items-center justify-end pb-2 md:pb-4 z-40 bg-gradient-to-t from-black/90 to-transparent pointer-events-none">
            
            {/* Auto Play Overlay/Button */}
            {isAuto && (
@@ -1364,8 +1366,8 @@ ${url}
            </div>
 
            {/* Hand - Scrollable on mobile if needed but centered */}
-           <div className="flex pointer-events-auto overflow-x-visible items-end pb-1 w-full justify-center">
-               <div className={`flex -space-x-5 md:-space-x-8 hover:-space-x-4 transition-all duration-300 px-4 pb-2 ${isAuto ? 'grayscale opacity-80' : ''}`}>
+           <div className="flex pointer-events-auto overflow-x-auto md:overflow-x-visible items-end pb-1 w-full justify-start md:justify-center px-2">
+               <div className={`flex -space-x-4 md:-space-x-8 hover:-space-x-4 transition-all duration-300 px-2 md:px-4 pb-2 min-w-max ${isAuto ? 'grayscale opacity-80' : ''}`}>
                   {gameState.players[myPlayerId].hand.map((card) => (
                       <CardComponent 
                         key={card.id} 

@@ -92,7 +92,8 @@ export interface RoomInfo {
 export interface GameState {
   players: Player[];
   currentTurnIndex: number; // Index in the players array
-  handHistory: PlayedHand[]; // Stack of recent 6 hands
+  handHistory: PlayedHand[]; // Current trick history
+  tableHistory: PlayedHand[]; // Pool history (recent 6 plays)
   deck: Card[];
   passCount: number;
   winners: string[];

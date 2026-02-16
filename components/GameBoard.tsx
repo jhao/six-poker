@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Player, PlayedHand, EmoteMessage } from '../types';
 import { CardComponent } from './CardComponent';
-import { TEAM_A_INDICES, EMOTE_LIST, MAX_HISTORY_DISPLAY } from '../constants';
+import { TEAM_A_INDICES, EMOTE_LIST } from '../constants';
 
 interface GameBoardProps {
   players: Player[];
@@ -27,12 +27,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   // Positions for 6 players in a circle optimized for Mobile & Desktop
   // Index 0 updated to be higher to avoid overlap with hand cards (bottom-36/60 instead of bottom-16/8)
   const positions = [
-    'bottom-36 md:bottom-60 left-1/2 -translate-x-1/2', // Player 0 (User) - MOVED UP
-    'bottom-28 md:bottom-28 right-2 md:right-8',        // Player 1
-    'top-20 md:top-24 right-2 md:right-8',              // Player 2
-    'top-2 md:top-4 left-1/2 -translate-x-1/2',         // Player 3
-    'top-20 md:top-24 left-2 md:left-8',                // Player 4
-    'bottom-28 md:bottom-28 left-2 md:left-8'           // Player 5
+    'bottom-40 md:bottom-60 left-1/2 -translate-x-1/2',
+    'bottom-32 md:bottom-28 right-1 md:right-8',
+    'top-24 md:top-24 right-1 md:right-8',
+    'top-4 md:top-4 left-1/2 -translate-x-1/2',
+    'top-24 md:top-24 left-1 md:left-8',
+    'bottom-32 md:bottom-28 left-1 md:left-8'
   ];
 
   const handleAvatarClick = (targetId: number) => {
@@ -44,9 +44,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setEmoteMenuOpenId(null);
   };
 
-  // Logic to separate the very last hand (current focus) from history
-  const historyToDisplay = handHistory.length > 0 ? handHistory.slice(0, handHistory.length - 1).slice(-5) : [];
-  const currentHand = handHistory.length > 0 ? handHistory[handHistory.length - 1] : null;
+  // Show recent six plays in the pool, latest one as current focus
+  const recentPool = handHistory.slice(-6);
+  const historyToDisplay = recentPool.length > 1 ? recentPool.slice(0, recentPool.length - 1) : [];
+  const currentHand = recentPool.length > 0 ? recentPool[recentPool.length - 1] : null;
 
   return (
     <div className="relative w-full h-full">
@@ -57,7 +58,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           {/* HISTORY STACK (Left of Center) */}
           {historyToDisplay.length > 0 && (
              <div className="flex flex-col items-end opacity-70 scale-75 md:scale-90 origin-right transition-all">
-                 <div className="text-[10px] text-gray-400 mb-1">历史牌局</div>
+                 <div className="text-[10px] text-gray-400 mb-1">近六手牌池</div>
                  <div className="relative h-16 w-16 md:h-24 md:w-24">
                     {historyToDisplay.map((hand, i) => {
                          // Stack effect - increased offset for visibility
@@ -170,14 +171,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 )}
 
                 <div className={`
-                    w-8 h-8 md:w-12 md:h-12 rounded-full flex items-center justify-center font-bold text-sm md:text-lg border-2 shadow-inner
+                    w-7 h-7 md:w-12 md:h-12 rounded-full flex items-center justify-center font-bold text-xs md:text-lg border-2 shadow-inner
                     ${isTeammate ? 'bg-blue-600 border-blue-400' : 'bg-red-600 border-red-400'}
                     ${p.isFinished ? 'bg-gradient-to-br from-yellow-300 to-yellow-600 border-white' : ''}
                 `}>
                     {p.isFinished ? '🏆' : p.name.charAt(0)}
                 </div>
                 
-                <div className="mt-1 text-[10px] md:text-xs font-bold text-white shadow-black drop-shadow-md text-center leading-tight max-w-[80px] md:max-w-[100px] truncate">
+                <div className="mt-1 text-[10px] md:text-xs font-bold text-white shadow-black drop-shadow-md text-center leading-tight max-w-[68px] md:max-w-[100px] truncate">
                     {p.name} {p.isFinished && `(#${p.finishOrder})`}
                     {!p.isConnected && <span className="block text-[8px] text-red-300">(掉线)</span>}
                 </div>
@@ -194,7 +195,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
             {/* Opponent Hand Display (Hidden Cards) */}
             {idx !== 0 && !p.isFinished && (
-                <div className="mt-1 md:mt-2 flex -space-x-6 md:-space-x-8 scale-75 md:scale-100 origin-top">
+                <div className="mt-1 md:mt-2 flex -space-x-7 md:-space-x-8 scale-[0.62] md:scale-100 origin-top">
                     {p.hand.map((c, i) => (
                         <CardComponent key={c.id} card={c} small hidden />
                     ))}
