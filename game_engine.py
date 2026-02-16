@@ -118,6 +118,18 @@ def _auto_move(hand: List[Card], last: Optional[PlayedHand]) -> Optional[List[Ca
     return None
 
 
+def _run_bot_turns(room: Room):
+    while room.game_status == "playing":
+        nxt = room.players[room.turn_index]
+        if not nxt.is_bot or nxt.finished:
+            break
+        mv = _auto_move(nxt.hand, room.last_hand)
+        if mv:
+            apply_action(room, nxt.id, "play", [c.id for c in mv])
+        else:
+            apply_action(room, nxt.id, "pass", [])
+
+
 def create_room(name: str) -> Room:
     rid = str(random.randint(1000, 9999))
     pwd = str(random.randint(1000, 9999))
@@ -142,6 +154,8 @@ def start_game(room: Room):
     room.hand_history = []
     room.emotes = []
     room.logs.append(f"游戏开始，{room.players[starter].name} 持有红桃4先手")
+    room.updated_at = time.time()
+    _run_bot_turns(room)
 
 
 def serialize(room: Room, viewer_id: Optional[int] = None):
@@ -316,13 +330,6 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
         room.pass_count = 0
         room.logs.append("一轮过牌，重置牌权")
 
-    nxt = room.players[room.turn_index]
-    if nxt.is_bot:
-        mv = _auto_move(nxt.hand, room.last_hand)
-        if mv:
-            apply_action(room, nxt.id, "play", [c.id for c in mv])
-        else:
-            apply_action(room, nxt.id, "pass", [])
-
     room.updated_at = time.time()
+    _run_bot_turns(room)
     return True, "ok"
