@@ -24,15 +24,21 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 }) => {
   const [emoteMenuOpenId, setEmoteMenuOpenId] = useState<number | null>(null);
 
-  // Positions for 6 players in a circle optimized for Mobile & Desktop
-  const positions = [
-    'bottom-36 md:bottom-60 left-1/2 -translate-x-1/2', // Player 0 (User) - MOVED UP
-    'bottom-28 md:bottom-28 right-2 md:right-8',        // Player 1
-    'top-20 md:top-24 right-2 md:right-8',              // Player 2
-    'top-2 md:top-4 left-1/2 -translate-x-1/2',         // Player 3
-    'top-20 md:top-24 left-2 md:left-8',                // Player 4
-    'bottom-28 md:bottom-28 left-2 md:left-8'           // Player 5
-  ];
+  // Render everyone around the table relative to my seat (me stays at bottom-center).
+  const getRelativeSeatClass = (seatIndex: number) => {
+    const relativeSeat = ((seatIndex - myPlayerId) % players.length + players.length) % players.length;
+
+    const circularPositions = [
+      'bottom-20 md:bottom-28 left-1/2 -translate-x-1/2', // Me
+      'bottom-24 md:bottom-32 right-3 md:right-10',       // Bottom-right
+      'top-1/2 right-2 md:right-8 -translate-y-1/2',      // Right
+      'top-4 md:top-8 left-1/2 -translate-x-1/2',         // Top
+      'top-1/2 left-2 md:left-8 -translate-y-1/2',        // Left
+      'bottom-24 md:bottom-32 left-3 md:left-10'          // Bottom-left
+    ];
+
+    return circularPositions[relativeSeat] ?? circularPositions[0];
+  };
 
   const handleAvatarClick = (targetId: number) => {
     setEmoteMenuOpenId(targetId);
@@ -49,7 +55,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const currentHand = recentPool.length > 0 ? recentPool[recentPool.length - 1] : null;
 
   return (
-    <div className="relative w-full h-full">
+    <div className="w-full h-full">
       
       {/* --- CENTER STAGE AREA --- */}
       <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10 flex items-center justify-center pointer-events-none gap-4 md:gap-8">
@@ -136,13 +142,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       {/* --- PLAYERS --- */}
       {players.map((p, idx) => {
         const isCurrentTurn = idx === currentTurnIndex;
-        const isTeammate = TEAM_A_INDICES.includes(myPlayerId) === TEAM_A_INDICES.includes(idx);
+        const isTeammate = TEAM_A_INDICES.includes(myPlayerId) === TEAM_A_INDICES.includes(p.id);
         const playerEmote = activeEmotes.find(e => e.senderId === p.id);
         
         return (
           <div 
             key={p.id} 
-            className={`absolute ${positions[idx]} flex flex-col items-center transition-all duration-300 z-20`}
+            className={`absolute ${getRelativeSeatClass(p.seatIndex)} flex flex-col items-center transition-all duration-300 z-20`}
           >
             {/* Emote Bubble */}
             {playerEmote && (
@@ -193,7 +199,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             </div>
 
             {/* Opponent Hand Display (Hidden Cards) */}
-            {idx !== 0 && !p.isFinished && (
+            {p.id !== myPlayerId && !p.isFinished && (
                 <div className="mt-1 md:mt-2 flex -space-x-7 md:-space-x-8 scale-[0.62] md:scale-100 origin-top">
                     {p.hand.map((c, i) => (
                         <CardComponent key={c.id} card={c} small hidden />
