@@ -55,6 +55,7 @@ class Room:
     hand_history: List[PlayedHand] = field(default_factory=list)
     spectator_names: List[str] = field(default_factory=list)
     logs: List[str] = field(default_factory=list)
+    emotes: List[dict] = field(default_factory=list)
     updated_at: float = field(default_factory=time.time)
 
 
@@ -139,6 +140,7 @@ def start_game(room: Room):
     room.pass_count = 0
     room.winners = []
     room.hand_history = []
+    room.emotes = []
     room.logs.append(f"游戏开始，{room.players[starter].name} 持有红桃4先手")
 
 
@@ -150,6 +152,26 @@ def serialize(room: Room, viewer_id: Optional[int] = None):
         else:
             p["hand"] = p["hand"]
     return data
+
+
+def add_emote(room: Room, sender_id: int, target_id: int, content: str):
+    if sender_id < 0 or sender_id >= len(room.players):
+        return False, "发送者不存在"
+    sender = room.players[sender_id]
+    if sender.is_bot:
+        return False, "电脑玩家不能发送消息"
+    if target_id != -1 and (target_id < 0 or target_id >= len(room.players)):
+        return False, "目标不存在"
+
+    room.emotes.append({
+        "sender_id": sender_id,
+        "target_id": target_id,
+        "content": content,
+        "timestamp": int(time.time() * 1000)
+    })
+    room.emotes = room.emotes[-50:]
+    room.updated_at = time.time()
+    return True, "ok"
 
 
 def join_room(room: Room, name: str):

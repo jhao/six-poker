@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, render_template, request
-from game_engine import Room, apply_action, create_room, join_room, leave_room, serialize, start_game, swap_seat
+from game_engine import Room, add_emote, apply_action, create_room, join_room, leave_room, serialize, start_game, swap_seat
 
 app = Flask(__name__)
 rooms: dict[str, Room] = {}
@@ -98,6 +98,19 @@ def api_dissolve_room(room_id):
         return jsonify({"error": "仅房主可解散房间"}), 403
     del rooms[room_id]
     return jsonify({"ok": True})
+
+
+@app.post('/api/rooms/<room_id>/emote')
+def api_emote(room_id):
+    room = rooms.get(room_id)
+    if not room:
+        return jsonify({"error": "房间不存在"}), 404
+    body = request.json or {}
+    ok, msg = add_emote(room, int(body.get('sender_id', -1)), int(body.get('target_id', -1)), body.get('content', ''))
+    if not ok:
+        return jsonify({"error": msg}), 400
+    return jsonify({"ok": True})
+
 
 @app.post('/api/rooms/<room_id>/action')
 def api_action(room_id):

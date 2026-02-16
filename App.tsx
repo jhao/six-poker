@@ -20,6 +20,7 @@ type BackendRoomState = {
   pass_count: number;
   winners: number[];
   logs: string[];
+  emotes?: { sender_id: number; target_id: number; content: string; timestamp: number }[];
 };
 
 const backendRankToLocal = (rank?: string): Rank => {
@@ -100,7 +101,9 @@ const App: React.FC = () => {
     activeEmotes: [],
     scores: [],
     currentRound: 1,
-    turnTimeLeft: TURN_DURATION
+    turnTimeLeft: TURN_DURATION,
+    roundFinishRanking: [],
+    teamBattleSummary: { teamA: 0, teamB: 0 }
   });
 
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
@@ -192,6 +195,9 @@ const App: React.FC = () => {
   }, []);
 
   const syncFromBackendState = useCallback((state: BackendRoomState) => {
+      const finishOrderMap = new Map<number, number>();
+      state.winners.forEach((pid, index) => finishOrderMap.set(pid, index + 1));
+
       const players: Player[] = state.players.map((p, idx) => ({
           id: p.id,
           name: p.name,
@@ -199,7 +205,7 @@ const App: React.FC = () => {
           hand: p.hand.map(toLocalCard),
           isHuman: !isSpectator && p.id === myPlayerId,
           isFinished: p.finished,
-          finishOrder: null,
+          finishOrder: finishOrderMap.get(p.id) || null,
           isReady: p.ready,
           isConnected: true,
           isBot: p.is_bot,
@@ -211,13 +217,14 @@ const App: React.FC = () => {
           ? state.hand_history
           : (state.last_hand ? [state.last_hand] : []);
 
-      const history: PlayedHand[] = rawHistory.map(hand => ({
+      const history: PlayedHand[] = rawHistory.map((hand, index) => ({
           cards: hand.cards.map(toLocalCard),
           type: backendTypeToLocal(hand.hand_type),
           mainRankValue: hand.main_rank,
           playerId: hand.player_id,
           playerName: players[hand.player_id]?.name || '未知玩家',
-          playerTeam: players[hand.player_id]?.team || 'A'
+          playerTeam: players[hand.player_id]?.team || 'A',
+          playedAt: Date.now() + index
       }));
 
       setRoom({
@@ -228,18 +235,59 @@ const App: React.FC = () => {
           players,
       });
 
-      setGameState(prev => ({
-          ...prev,
-          players,
-          currentTurnIndex: state.turn_index,
-          handHistory: history,
-          tableHistory: history.slice(-6),
-          passCount: state.pass_count,
-          winners: state.winners.map(pid => players[pid]?.name || `玩家${pid + 1}`),
-          logs: state.logs,
-          gameStatus: state.game_status === 'round_over' ? 'roundOver' : state.game_status,
-          turnTimeLeft: prev.turnTimeLeft
-      }));
+      setGameState(prev => {
+          const mergedPlayers = players.map(player => {
+            const prevPlayer = prev.players[player.id];
+            const keepAuto = player.id === myPlayerId && player.id === state.turn_index;
+            return { ...player, isAutoPlayed: keepAuto ? Boolean(prevPlayer?.isAutoPlayed) : false };
+          });
+
+          const teamAFinishedCount = mergedPlayers.filter(p => p.team === 'A' && p.isFinished).length;
+          const teamBFinishedCount = mergedPlayers.filter(p => p.team === 'B' && p.isFinished).length;
+          const isRoundOver = state.game_status === 'round_over';
+          const wasPlaying = prev.gameStatus === 'playing';
+          const winnerTeam = teamAFinishedCount >= 3 ? 'A' : 'B';
+
+          const nextState: GameState = {
+            ...prev,
+            players: mergedPlayers,
+            currentTurnIndex: state.turn_index,
+            handHistory: history,
+            tableHistory: history.slice(-6),
+            passCount: state.pass_count,
+            winners: state.winners.map(pid => mergedPlayers[pid]?.name || `玩家${pid + 1}`),
+            logs: state.logs,
+            activeEmotes: (state.emotes || []).slice(-8).map(e => ({
+              senderId: e.sender_id,
+              targetId: e.target_id,
+              content: e.content,
+              timestamp: e.timestamp
+            })),
+            gameStatus: isRoundOver ? 'roundOver' : state.game_status,
+            turnTimeLeft: prev.currentTurnIndex === state.turn_index ? prev.turnTimeLeft : TURN_DURATION,
+            roundFinishRanking: state.winners.map((pid, idx) => `${idx + 1}. ${mergedPlayers[pid]?.name || `玩家${pid + 1}`}(${mergedPlayers[pid]?.team || 'A'}队)`),
+            teamBattleSummary: prev.teamBattleSummary
+          };
+
+          if (isRoundOver && wasPlaying && (teamAFinishedCount >= 3 || teamBFinishedCount >= 3)) {
+            nextState.scores = [
+              ...prev.scores,
+              {
+                round: prev.currentRound,
+                winnerTeam,
+                teamAScore: winnerTeam === 'A' ? 1 : 0,
+                teamBScore: winnerTeam === 'B' ? 1 : 0,
+                details: `头游: ${state.winners.length > 0 ? mergedPlayers[state.winners[0]]?.name : '未知'}`
+              }
+            ];
+            nextState.teamBattleSummary = {
+              teamA: prev.teamBattleSummary.teamA + (winnerTeam === 'A' ? 1 : 0),
+              teamB: prev.teamBattleSummary.teamB + (winnerTeam === 'B' ? 1 : 0)
+            };
+          }
+
+          return nextState;
+      });
 
       if (state.game_status === 'waiting') setView('room_waiting');
       else if (state.game_status === 'round_over') setView('score_summary');
@@ -393,20 +441,32 @@ ${url}
     }
   };
 
-  const sendLobbyMessage = (msg: string) => {
-      // Simulate receiving a message in lobby
+  const sendLobbyMessage = async (msg: string) => {
       const emote: EmoteMessage = {
           senderId: myPlayerId,
-          targetId: -1, // Broadcast
+          targetId: -1,
           content: msg,
           timestamp: Date.now()
       };
+
+      if (isOnlineRoom && room) {
+        try {
+          await apiRequest(`/api/rooms/${room.roomId}/emote`, 'POST', {
+            sender_id: myPlayerId,
+            target_id: -1,
+            content: msg
+          });
+        } catch (error) {
+          alert(error instanceof Error ? error.message : '发送消息失败');
+        }
+        return;
+      }
+
       setGameState(prev => ({
           ...prev,
           activeEmotes: [...prev.activeEmotes, emote]
       }));
       
-      // Auto clear
       setTimeout(() => {
           setGameState(prev => ({
               ...prev,
@@ -414,7 +474,6 @@ ${url}
           }));
       }, 3000);
   };
-
   const startGame = useCallback(async () => {
     if (!room) return;
 
@@ -468,13 +527,15 @@ ${url}
       winners: [],
       logs: [`游戏开始！${players[starterIndex].name} 拥有红桃4，先出牌。`],
       activeEmotes: [],
-      scores: [],
-      currentRound: 1,
-      turnTimeLeft: TURN_DURATION
+      scores: gameState.scores,
+      currentRound: gameState.currentRound,
+      turnTimeLeft: TURN_DURATION,
+      roundFinishRanking: [],
+      teamBattleSummary: gameState.teamBattleSummary
     });
     setSelectedCards([]);
     setView('game');
-  }, [room, myPlayerId, isSpectator, apiRequest]);
+  }, [room, myPlayerId, isSpectator, apiRequest, gameState.currentRound, gameState.scores, gameState.teamBattleSummary]);
 
 
 
@@ -563,7 +624,8 @@ ${url}
         mainRankValue: handAnalysis.mainRankValue,
         playerId,
         playerName: player.name,
-        playerTeam: player.team
+        playerTeam: player.team,
+        playedAt: Date.now()
       };
 
       const newHistory = [...prev.handHistory, playedHand];
@@ -657,16 +719,29 @@ ${url}
     });
   };
 
-  const sendEmote = (targetId: number, content: string) => {
+  const sendEmote = async (targetId: number, content: string) => {
       const senderName = gameState.players[myPlayerId]?.name || userName || `玩家${myPlayerId + 1}`;
-      const targetName = gameState.players[targetId]?.name || `玩家${targetId + 1}`;
+      const targetName = targetId === -1 ? '所有人' : (gameState.players[targetId]?.name || `玩家${targetId + 1}`);
       const emote: EmoteMessage = {
           senderId: myPlayerId,
           targetId,
           content: `【${senderName}向${targetName}发送的】：${content}`,
-          
           timestamp: Date.now()
       };
+
+      if (isOnlineRoom && room) {
+          try {
+              await apiRequest(`/api/rooms/${room.roomId}/emote`, 'POST', {
+                  sender_id: myPlayerId,
+                  target_id: targetId,
+                  content: emote.content
+              });
+          } catch (error) {
+              alert(error instanceof Error ? error.message : '发送消息失败');
+          }
+          return;
+      }
+
       setGameState(prev => ({
           ...prev,
           activeEmotes: [...prev.activeEmotes, emote]
@@ -806,7 +881,8 @@ ${url}
   const cancelAutoPlay = () => {
       setGameState(prev => ({
           ...prev,
-          players: prev.players.map(p => p.id === myPlayerId ? { ...p, isAutoPlayed: false } : p)
+          players: prev.players.map(p => p.id === myPlayerId ? { ...p, isAutoPlayed: false } : p),
+          turnTimeLeft: TURN_DURATION
       }));
   };
 
@@ -840,28 +916,71 @@ ${url}
 
   // Timer Effect & Timeout AutoPlay Logic
   useEffect(() => {
-    if (gameState.gameStatus === 'playing' && room?.roomId === 'LOCAL') {
-      const timer = setInterval(() => {
-        setGameState(prev => {
-          // If time runs out
-          if (prev.turnTimeLeft <= 0) {
-              // If it's MY turn and I am not already auto-played, enable auto-play
-              const currentPlayer = prev.players[prev.currentTurnIndex];
-              if (currentPlayer.id === myPlayerId && !isSpectator && !currentPlayer.isAutoPlayed && currentPlayer.isHuman) {
-                   return {
-                       ...prev,
-                       players: prev.players.map(p => p.id === myPlayerId ? { ...p, isAutoPlayed: true } : p),
-                       turnTimeLeft: 0 // Keep at 0 to trigger move logic
-                   };
-              }
-              return prev; 
+    if (gameState.gameStatus !== 'playing' || !room) return;
+
+    const timer = setInterval(() => {
+      setGameState(prev => {
+        if (prev.turnTimeLeft <= 0) {
+          const currentPlayer = prev.players[prev.currentTurnIndex];
+          if (currentPlayer?.id === myPlayerId && !isSpectator && !currentPlayer.isAutoPlayed && currentPlayer.isHuman) {
+            return {
+              ...prev,
+              players: prev.players.map(p => p.id === myPlayerId ? { ...p, isAutoPlayed: true } : p),
+              turnTimeLeft: 0
+            };
           }
-          return { ...prev, turnTimeLeft: prev.turnTimeLeft - 1 };
+          return prev;
+        }
+        return { ...prev, turnTimeLeft: prev.turnTimeLeft - 1 };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [gameState.gameStatus, room?.roomId, myPlayerId, isSpectator]);
+
+  // Online timeout hosting: after countdown ends, auto play/pass for current player
+  useEffect(() => {
+    if (!isOnlineRoom || !room || gameState.gameStatus !== 'playing') return;
+    if (isSpectator || gameState.currentTurnIndex !== myPlayerId) return;
+    if (gameState.turnTimeLeft > 0) return;
+
+    const doAutoAction = async () => {
+      const activePlayers = gameState.players.filter(p => !p.isFinished).length;
+      let threshold = activePlayers - 1;
+      if (gameState.handHistory.length > 0) {
+        const lastPid = gameState.handHistory[gameState.handHistory.length - 1].playerId;
+        if (gameState.players[lastPid].isFinished) {
+          threshold = activePlayers;
+        }
+      }
+      const isFree = gameState.handHistory.length === 0 || gameState.passCount >= threshold;
+      const lastHand = isFree ? null : gameState.handHistory[gameState.handHistory.length - 1];
+      const move = findAutoMove(gameState.players[myPlayerId].hand, lastHand);
+      try {
+        await apiRequest(`/api/rooms/${room.roomId}/action`, 'POST', {
+          player_id: myPlayerId,
+          action: move ? 'play' : 'pass',
+          card_ids: move ? move.map(card => card.id) : []
         });
-      }, 1000);
-      return () => clearInterval(timer);
-    }
-  }, [gameState.gameStatus, gameState.currentTurnIndex, myPlayerId, isSpectator]);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    doAutoAction();
+  }, [
+    isOnlineRoom,
+    room?.roomId,
+    gameState.gameStatus,
+    gameState.currentTurnIndex,
+    gameState.turnTimeLeft,
+    gameState.handHistory,
+    gameState.passCount,
+    gameState.players,
+    myPlayerId,
+    isSpectator,
+    apiRequest
+  ]);
 
   // Turn Handling Effect
   useEffect(() => {
@@ -916,6 +1035,14 @@ ${url}
             ...prev,
             gameStatus: 'roundOver',
             scores: [...prev.scores, newScore],
+            roundFinishRanking: [...prev.players]
+              .filter(p => p.finishOrder !== null)
+              .sort((a, b) => (a.finishOrder || 99) - (b.finishOrder || 99))
+              .map(p => `${p.finishOrder}. ${p.name}(${p.team}队)`),
+            teamBattleSummary: {
+              teamA: prev.teamBattleSummary.teamA + (winningTeam === 'A' ? 1 : 0),
+              teamB: prev.teamBattleSummary.teamB + (winningTeam === 'B' ? 1 : 0)
+            },
             logs: [`本局结束：${winningTeam}队胜利。`, ...prev.logs].slice(0, 50)
         }));
         setView('score_summary');
@@ -1009,7 +1136,7 @@ ${url}
   };
 
   const continueGame = () => {
-      setGameState(prev => ({ ...prev, currentRound: prev.currentRound + 1 }));
+      setGameState(prev => ({ ...prev, currentRound: prev.currentRound + 1, roundFinishRanking: [] }));
       startGame();
   };
 
@@ -1217,7 +1344,7 @@ ${url}
                               ${isSpectator || !p.isBot || p.id === myPlayerId ? 'cursor-default' : ''}
                           `}>
                               {pEmote && (
-                                  <div className="absolute -top-10 bg-white text-black text-xs px-2 py-1 rounded-lg shadow-lg whitespace-nowrap z-10 animate-bounce">
+                                  <div className="absolute -top-10 bg-white text-black text-xs px-4 py-1.5 rounded-lg shadow-lg z-10 animate-bounce min-w-[200px] max-w-[500px] text-center break-words">
                                       {pEmote.content}
                                   </div>
                               )}
@@ -1293,8 +1420,27 @@ ${url}
                        )}
                    </div>
 
+                   <div className="mb-6 text-left bg-slate-900/50 rounded-lg p-4 border border-slate-600">
+                       <h3 className="font-bold border-b border-gray-600 pb-2 mb-2 text-center">本局出完顺序</h3>
+                       {gameState.roundFinishRanking.length > 0 ? (
+                         <ol className="space-y-1 text-sm">
+                           {gameState.roundFinishRanking.map((name, idx) => (
+                              <li key={idx} className="flex justify-between">
+                                <span>第 {idx + 1} 名</span>
+                                <span className="font-bold">{name}</span>
+                              </li>
+                           ))}
+                         </ol>
+                       ) : (
+                         <div className="text-sm text-gray-400 text-center">暂无完整出完顺序</div>
+                       )}
+                   </div>
+
                    <div className="mb-8">
                        <h3 className="font-bold border-b border-gray-600 pb-2 mb-2">历史战绩</h3>
+                       <div className="text-sm mb-2 text-center text-yellow-300">
+                         累计胜场：A队 {gameState.teamBattleSummary.teamA} 次 · B队 {gameState.teamBattleSummary.teamB} 次
+                       </div>
                        <div className="max-h-40 overflow-y-auto text-sm space-y-1">
                            {gameState.scores.map((s, i) => (
                                <div key={i} className="flex justify-between px-4">
@@ -1399,7 +1545,7 @@ ${url}
                        className="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded-full shadow-lg border-2 border-red-400 text-sm md:text-base flex items-center gap-2"
                    >
                        <span>🤖 托管中</span>
-                       <span className="bg-white/20 px-2 rounded text-xs">点击恢复</span>
+                       <span className="bg-white/20 px-2 rounded text-xs">取消托管</span>
                    </button>
                </div>
            )}
@@ -1438,7 +1584,7 @@ ${url}
 
            {/* Hand - Scrollable on mobile if needed but centered */}
            <div className="flex pointer-events-auto overflow-x-auto md:overflow-x-visible items-end pb-1 w-full justify-start md:justify-center px-2">
-               <div className={`flex -space-x-4 md:-space-x-8 hover:-space-x-4 transition-all duration-300 px-2 md:px-4 pb-2 min-w-max ${isAuto ? 'grayscale opacity-80' : ''}`}>
+               <div className={`flex -space-x-4 md:-space-x-8 hover:-space-x-4 transition-all duration-300 px-2 md:px-4 pb-2 min-w-max scale-90 origin-bottom ${isAuto ? 'grayscale opacity-80' : ''}`}>
                   {gameState.players[myPlayerId].hand.map((card) => (
                       <CardComponent 
                         key={card.id} 

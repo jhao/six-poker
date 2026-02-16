@@ -29,7 +29,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     const relativeSeat = ((seatIndex - myPlayerId) % players.length + players.length) % players.length;
 
     const circularPositions = [
-      'bottom-20 md:bottom-28 left-1/2 -translate-x-1/2', // Me
+      'bottom-28 md:bottom-36 left-1/2 -translate-x-1/2', // Me (raised up)
       'bottom-24 md:bottom-32 right-3 md:right-10',       // Bottom-right
       'top-1/2 right-2 md:right-8 -translate-y-1/2',      // Right
       'top-4 md:top-8 left-1/2 -translate-x-1/2',         // Top
@@ -65,6 +65,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const recentPool = handHistory.slice(-6);
   const historyToDisplay = recentPool.length > 1 ? recentPool.slice(0, recentPool.length - 1) : [];
   const currentHand = recentPool.length > 0 ? recentPool[recentPool.length - 1] : null;
+  const currentHandKey = currentHand ? `${currentHand.playerId}-${currentHand.cards.map(c => c.id).join('-')}` : 'none';
 
   return (
     <div className="w-full h-full">
@@ -99,7 +100,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           {/* CURRENT PLAYED HAND (Center) */}
           <div className="flex flex-col items-center justify-center">
               {currentHand ? (
-                  <div className="flex flex-col items-center animate-pop-in">
+                  <div key={currentHandKey} className="flex flex-col items-center animate-pop-in">
                       <div className={`
                           text-xs md:text-sm mb-2 font-mono drop-shadow-md px-3 py-1 rounded-full border border-white/30 font-bold
                           ${currentHand.playerTeam === 'A' ? 'bg-blue-900/80 text-blue-200' : 'bg-red-900/80 text-red-200'}
@@ -163,7 +164,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           >
             {/* Emote Bubble */}
             {playerEmote && (
-                <div className="absolute -top-14 md:-top-20 bg-white text-black px-3 py-2 rounded-2xl rounded-bl-none shadow-lg animate-bounce z-50 text-xs md:text-sm font-bold border-2 border-gray-200 max-w-[220px] whitespace-normal break-words leading-snug">
+                <div className="absolute -top-14 md:-top-20 bg-white text-black px-3 py-2 rounded-2xl rounded-bl-none shadow-lg animate-bounce z-50 text-xs md:text-sm font-bold border-2 border-gray-200 max-w-[560px] min-w-[250px] whitespace-normal break-words leading-snug">
                     {renderEmoteContent(playerEmote.content)}
                 </div>
             )}
