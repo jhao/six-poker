@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Player, PlayedHand, EmoteMessage } from '../types';
 import { CardComponent } from './CardComponent';
 import { EMOTE_LIST } from '../constants';
@@ -23,6 +23,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   turnTimeLeft
 }) => {
   const [emoteMenuOpenId, setEmoteMenuOpenId] = useState<number | null>(null);
+  const [dismissedEmoteAt, setDismissedEmoteAt] = useState<number[]>([]);
+  const [flyingCardKey, setFlyingCardKey] = useState<string>('');
 
   // Render everyone around the table relative to my seat (me stays at bottom-center).
   const getRelativeSeatClass = (seatIndex: number) => {
@@ -61,16 +63,67 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setEmoteMenuOpenId(null);
   };
 
+  const latestEmote = useMemo(() => {
+    const sorted = [...activeEmotes].sort((a, b) => b.timestamp - a.timestamp);
+    return sorted.find((emote) => !dismissedEmoteAt.includes(emote.timestamp)) || null;
+  }, [activeEmotes, dismissedEmoteAt]);
+
+  useEffect(() => {
+    if (!latestEmote) return;
+    const timer = setTimeout(() => {
+      setDismissedEmoteAt(prev => [...prev, latestEmote.timestamp]);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [latestEmote]);
+
   // Show recent six plays in the pool, latest one as current focus
   const recentPool = handHistory.slice(-6);
   const historyToDisplay = recentPool.length > 1 ? recentPool.slice(0, recentPool.length - 1) : [];
   const currentHand = recentPool.length > 0 ? recentPool[recentPool.length - 1] : null;
   const currentHandKey = currentHand ? `${currentHand.playerId}-${currentHand.cards.map(c => c.id).join('-')}` : 'none';
 
+  useEffect(() => {
+    if (!currentHand) return;
+    const key = `${currentHand.playerId}-${currentHand.playedAt}`;
+    setFlyingCardKey(key);
+    const timer = setTimeout(() => setFlyingCardKey(''), 650);
+    return () => clearTimeout(timer);
+  }, [currentHand?.playedAt]);
+
+  const teamLabel = (team: 'A' | 'B') => team === 'A' ? '蓝队' : '红队';
+
+  const getFlightStartClass = (seatIndex: number) => {
+    const relativeSeat = ((seatIndex - myPlayerId) % players.length + players.length) % players.length;
+    const starts = [
+      'left-1/2 bottom-32',
+      'right-12 bottom-28',
+      'right-12 top-1/2',
+      'left-1/2 top-12',
+      'left-12 top-1/2',
+      'left-12 bottom-28'
+    ];
+    return starts[relativeSeat] ?? starts[0];
+  };
+
   return (
     <div className="w-full h-full">
       
       {/* --- CENTER STAGE AREA --- */}
+      {latestEmote && (
+        <button
+          onClick={() => setDismissedEmoteAt(prev => [...prev, latestEmote.timestamp])}
+          className="absolute top-10 left-1/2 -translate-x-1/2 z-50 bg-white text-black px-4 py-2 rounded-2xl shadow-lg text-sm font-bold min-w-[240px] max-w-[min(92vw,700px)] break-words text-center"
+        >
+          {renderEmoteContent(latestEmote.content)}
+        </button>
+      )}
+
+      {currentHand && flyingCardKey && (
+        <div className={`absolute ${getFlightStartClass(currentHand.playerId)} z-30 pointer-events-none animate-fly-to-pool`}>
+          <div className="w-8 h-12 md:w-10 md:h-14 bg-white/90 rounded-md border border-slate-300 shadow-xl" />
+        </div>
+      )}
+
       <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10 flex items-center justify-center pointer-events-none gap-4 md:gap-8">
           
           {/* HISTORY STACK (Left of Center) */}
@@ -105,7 +158,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                           text-xs md:text-sm mb-2 font-mono drop-shadow-md px-3 py-1 rounded-full border border-white/30 font-bold
                           ${currentHand.playerTeam === 'A' ? 'bg-blue-900/80 text-blue-200' : 'bg-red-900/80 text-red-200'}
                       `}>
-                           {currentHand.playerName} ({currentHand.playerTeam}队)
+                           {currentHand.playerName} ({teamLabel(currentHand.playerTeam)})
                       </div>
                       <div className="flex gap-1 justify-center shadow-2xl scale-110 md:scale-125 transition-transform duration-300">
                           {currentHand.cards.map(c => (
@@ -155,20 +208,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       {/* --- PLAYERS --- */}
       {players.map((p, idx) => {
         const isCurrentTurn = idx === currentTurnIndex;
-        const playerEmote = activeEmotes.find(e => e.senderId === p.id);
-        
         return (
           <div 
             key={p.id} 
             className={`absolute ${getRelativeSeatClass(p.seatIndex)} flex flex-col items-center transition-all duration-300 z-20`}
           >
-            {/* Emote Bubble */}
-            {playerEmote && (
-                <div className="absolute -top-14 md:-top-20 bg-white text-black px-3 py-2 rounded-2xl rounded-bl-none shadow-lg animate-bounce z-50 text-xs md:text-sm font-bold border-2 border-gray-200 max-w-[560px] min-w-[250px] whitespace-normal break-words leading-snug">
-                    {renderEmoteContent(playerEmote.content)}
-                </div>
-            )}
-            
             {/* Player Avatar/Info */}
             <div 
                 onClick={() => handleAvatarClick(p.id)}
