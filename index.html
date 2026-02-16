@@ -16,22 +16,36 @@
         box-shadow: 1px 1px 3px rgba(0,0,0,0.5);
       }
 
-      @keyframes fly-to-pool {
-        0% {
-          transform: translate(-50%, -50%) scale(1);
-          opacity: 0;
-        }
-        15% {
-          opacity: 1;
-        }
-        100% {
-          transform: translate(calc(-50vw + 50%), calc(-50vh + 50%)) scale(0.55);
-          opacity: 0;
-        }
+      @keyframes fly-to-pool-from-bottom {
+        0% { transform: translate(-50%, -50%) scale(1); opacity: 0.95; }
+        100% { transform: translate(-50%, calc(-50vh + 50%)) scale(0.55); opacity: 0; }
       }
-      .animate-fly-to-pool {
-        animation: fly-to-pool 0.65s ease-out forwards;
+      @keyframes fly-to-pool-from-bottom-right {
+        0% { transform: translate(-50%, -50%) scale(1); opacity: 0.95; }
+        100% { transform: translate(calc(-50vw - 3.5rem), calc(-50vh + 50%)) scale(0.55); opacity: 0; }
       }
+      @keyframes fly-to-pool-from-right {
+        0% { transform: translate(-50%, -50%) scale(1); opacity: 0.95; }
+        100% { transform: translate(calc(-50vw - 3.5rem), -50%) scale(0.55); opacity: 0; }
+      }
+      @keyframes fly-to-pool-from-top {
+        0% { transform: translate(-50%, -50%) scale(1); opacity: 0.95; }
+        100% { transform: translate(-50%, calc(50vh - 2.5rem)) scale(0.55); opacity: 0; }
+      }
+      @keyframes fly-to-pool-from-left {
+        0% { transform: translate(-50%, -50%) scale(1); opacity: 0.95; }
+        100% { transform: translate(calc(50vw - 3.5rem), -50%) scale(0.55); opacity: 0; }
+      }
+      @keyframes fly-to-pool-from-bottom-left {
+        0% { transform: translate(-50%, -50%) scale(1); opacity: 0.95; }
+        100% { transform: translate(calc(50vw - 3.5rem), calc(-50vh + 50%)) scale(0.55); opacity: 0; }
+      }
+      .animate-fly-to-pool-from-bottom { animation: fly-to-pool-from-bottom 0.55s ease-out forwards; }
+      .animate-fly-to-pool-from-bottom-right { animation: fly-to-pool-from-bottom-right 0.55s ease-out forwards; }
+      .animate-fly-to-pool-from-right { animation: fly-to-pool-from-right 0.55s ease-out forwards; }
+      .animate-fly-to-pool-from-top { animation: fly-to-pool-from-top 0.55s ease-out forwards; }
+      .animate-fly-to-pool-from-left { animation: fly-to-pool-from-left 0.55s ease-out forwards; }
+      .animate-fly-to-pool-from-bottom-left { animation: fly-to-pool-from-bottom-left 0.55s ease-out forwards; }
       /* Custom scrollbar for logs */
       ::-webkit-scrollbar {
         width: 4px;

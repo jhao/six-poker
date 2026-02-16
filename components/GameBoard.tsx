@@ -92,8 +92,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
   const teamLabel = (team: 'A' | 'B') => team === 'A' ? '蓝队' : '红队';
 
+  const getRelativeSeat = (seatIndex: number) => ((seatIndex - myPlayerId) % players.length + players.length) % players.length;
+
   const getFlightStartClass = (seatIndex: number) => {
-    const relativeSeat = ((seatIndex - myPlayerId) % players.length + players.length) % players.length;
+    const relativeSeat = getRelativeSeat(seatIndex);
     const starts = [
       'left-1/2 bottom-32',
       'right-12 bottom-28',
@@ -103,6 +105,19 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       'left-12 bottom-28'
     ];
     return starts[relativeSeat] ?? starts[0];
+  };
+
+  const getFlightDirectionClass = (seatIndex: number) => {
+    const relativeSeat = getRelativeSeat(seatIndex);
+    const directions = [
+      'animate-fly-to-pool-from-bottom',
+      'animate-fly-to-pool-from-bottom-right',
+      'animate-fly-to-pool-from-right',
+      'animate-fly-to-pool-from-top',
+      'animate-fly-to-pool-from-left',
+      'animate-fly-to-pool-from-bottom-left'
+    ];
+    return directions[relativeSeat] ?? directions[0];
   };
 
   return (
@@ -119,7 +134,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       )}
 
       {currentHand && flyingCardKey && (
-        <div className={`absolute ${getFlightStartClass(currentHand.playerId)} z-30 pointer-events-none animate-fly-to-pool`}>
+        <div className={`absolute ${getFlightStartClass(currentHand.playerId)} z-30 pointer-events-none ${getFlightDirectionClass(currentHand.playerId)}`}>
           <div className="w-8 h-12 md:w-10 md:h-14 bg-white/90 rounded-md border border-slate-300 shadow-xl" />
         </div>
       )}
@@ -158,7 +173,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                           text-xs md:text-sm mb-2 font-mono drop-shadow-md px-3 py-1 rounded-full border border-white/30 font-bold
                           ${currentHand.playerTeam === 'A' ? 'bg-blue-900/80 text-blue-200' : 'bg-red-900/80 text-red-200'}
                       `}>
-                           {currentHand.playerName} ({teamLabel(currentHand.playerTeam)})
+                           {currentHand.playerName} {currentHand.playerId === myPlayerId && <span className="text-yellow-300 ml-1">(我)</span>} ({teamLabel(currentHand.playerTeam)})
                       </div>
                       <div className="flex gap-1 justify-center shadow-2xl scale-110 md:scale-125 transition-transform duration-300">
                           {currentHand.cards.map(c => (
@@ -243,6 +258,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     {p.name} {p.isFinished && `(#${p.finishOrder})`}
                     {!p.isConnected && <span className="block text-[8px] text-red-300">(掉线)</span>}
                 </div>
+                {p.isAutoPlayed && (
+                    <div className="-mt-1 mb-1 text-[9px] md:text-[10px] text-amber-200 font-bold bg-amber-900/70 border border-amber-400/50 px-1.5 py-0.5 rounded-full">
+                        托管
+                    </div>
+                )}
                 <div className="text-[8px] md:text-[10px] text-gray-300">
                     {p.hand.length} 张
                 </div>

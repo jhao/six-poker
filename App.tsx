@@ -3,7 +3,7 @@ import { Card, GameState, Player, HandType, Suit, Rank, PlayedHand, ViewState, R
 import { createDeck, shuffleDeck, sortHand, analyzeHand, canBeat, findAutoMove } from './utils/cardLogic';
 import { CardComponent } from './components/CardComponent';
 import { GameBoard } from './components/GameBoard';
-import { CARDS_PER_PLAYER, TOTAL_PLAYERS, TEAM_A_INDICES, LOBBY_MESSAGES, TURN_DURATION } from './constants';
+import { CARDS_PER_PLAYER, TOTAL_PLAYERS, TEAM_A_INDICES, LOBBY_MESSAGES, TURN_DURATION, HOSTED_TURN_DURATION } from './constants';
 
 type BackendCard = { id: string; suit?: string; rank?: string; value?: number; is_wild?: boolean };
 type BackendPlayer = { id: number; name: string; team: 'A' | 'B'; hand: BackendCard[]; ready: boolean; is_bot: boolean; finished: boolean };
@@ -269,7 +269,7 @@ const App: React.FC = () => {
               timestamp: e.timestamp
             })),
             gameStatus: isRoundOver ? 'roundOver' : state.game_status,
-            turnTimeLeft: prev.currentTurnIndex === state.turn_index ? prev.turnTimeLeft : TURN_DURATION,
+            turnTimeLeft: prev.currentTurnIndex === state.turn_index ? prev.turnTimeLeft : (mergedPlayers[state.turn_index]?.isAutoPlayed ? HOSTED_TURN_DURATION : TURN_DURATION),
             roundFinishRanking: state.winners.map((pid, idx) => `${idx + 1}. ${mergedPlayers[pid]?.name || `玩家${pid + 1}`}(${teamLabel(mergedPlayers[pid]?.team || 'A')})`),
             teamBattleSummary: prev.teamBattleSummary
           };
@@ -557,6 +557,10 @@ ${url}
       return nextIndex;
   }, []);
 
+  const getTurnDurationForPlayer = useCallback((player: Player) => (
+    player.isAutoPlayed ? HOSTED_TURN_DURATION : TURN_DURATION
+  ), []);
+
   const handleTurn = useCallback(async () => {
     const { players, currentTurnIndex, handHistory, passCount, gameStatus, turnTimeLeft } = gameState;
     
@@ -579,7 +583,7 @@ ${url}
     }
 
     // Bot / Disconnect / Spectated / Timeout / AutoPlayed Turn
-    const thinkMs = isAuto ? 5000 : (isTimeout ? 0 : 1000);
+    const thinkMs = isAuto ? HOSTED_TURN_DURATION * 1000 : (isTimeout ? 0 : 1000);
     if (thinkMs > 0) {
         await new Promise(resolve => setTimeout(resolve, thinkMs));
     }
@@ -608,7 +612,7 @@ ${url}
     } else {
       passTurn(currentPlayer.id);
     }
-  }, [gameState, getNextActivePlayer]); // Added getNextActivePlayer dependency
+  }, [gameState, getNextActivePlayer, getTurnDurationForPlayer]); // Added getNextActivePlayer dependency
 
   const playCards = (playerId: number, cards: Card[]) => {
     const handAnalysis = analyzeHand(cards);
@@ -644,6 +648,7 @@ ${url}
       // After playing, it's the next active player's turn
       const nextIndex = getNextActivePlayer(playerId + 1, newPlayers);
 
+      const nextPlayer = newPlayers[nextIndex];
       return {
         ...prev,
         players: newPlayers,
@@ -653,7 +658,7 @@ ${url}
         passCount: 0, // Reset pass count on play
         logs: [`${player.name} 打出了 ${handAnalysis.type}`, ...prev.logs].slice(0, 50),
         winners: newWinners,
-        turnTimeLeft: TURN_DURATION
+        turnTimeLeft: getTurnDurationForPlayer(nextPlayer)
       };
     });
   };
@@ -698,7 +703,7 @@ ${url}
              
              if (!winner.isFinished) {
                  nextTurnIndex = winner.id;
-                 logs = [`${winner.name} 赢得了本轮`, ...logs];
+                 logs = [`${winner.name} 赢得了本轮，继续出牌`, ...logs];
              } else {
                  // Gei Feng: Winner is gone, next active player after winner starts
                  nextTurnIndex = getNextActivePlayer(winner.id + 1, prev.players);
@@ -714,13 +719,14 @@ ${url}
          resetPassCount = newPassCount;
       }
 
+      const nextPlayer = prev.players[nextTurnIndex];
       return {
         ...prev,
         passCount: resetPassCount,
         handHistory: newHistory,
         logs,
         currentTurnIndex: nextTurnIndex,
-        turnTimeLeft: TURN_DURATION
+        turnTimeLeft: getTurnDurationForPlayer(nextPlayer)
       };
     });
   };
@@ -932,7 +938,7 @@ ${url}
             return {
               ...prev,
               players: prev.players.map(p => p.id === myPlayerId ? { ...p, isAutoPlayed: true } : p),
-              turnTimeLeft: 0
+              turnTimeLeft: HOSTED_TURN_DURATION
             };
           }
           return prev;
@@ -979,7 +985,7 @@ ${url}
     };
 
     const me = gameState.players[myPlayerId];
-    const delayMs = me?.isAutoPlayed ? 5000 : 0;
+    const delayMs = me?.isAutoPlayed ? HOSTED_TURN_DURATION * 1000 : 0;
     onlineAutoActionRef.current = setTimeout(() => {
       doAutoAction();
     }, delayMs);
