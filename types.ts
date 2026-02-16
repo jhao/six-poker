@@ -48,6 +48,7 @@ export interface PlayedHand {
   playerId: number;
   playerName: string; // Snapshot of name
   playerTeam: 'A' | 'B'; // Snapshot of team
+  playedAt: number;
 }
 
 export interface Player {
@@ -90,6 +91,11 @@ export interface RoomInfo {
   isStarted: boolean; // To check if spectator needed
 }
 
+export interface TeamBattleSummary {
+  teamA: number;
+  teamB: number;
+}
+
 export interface GameState {
   players: Player[];
   currentTurnIndex: number; // Index in the players array
@@ -104,6 +110,8 @@ export interface GameState {
   currentRound: number;
   gameStatus: 'waiting' | 'playing' | 'roundOver';
   turnTimeLeft: number; // Seconds remaining for current turn
+  roundFinishRanking: string[];
+  teamBattleSummary: TeamBattleSummary;
 }
 
 export interface UserStats {
