@@ -109,6 +109,7 @@ const App: React.FC = () => {
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [myPlayerId, setMyPlayerId] = useState<number>(0); 
   const botIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onlineAutoActionRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Initialization & Persistence ---
   
@@ -180,6 +181,8 @@ const App: React.FC = () => {
   // --- Network Helpers ---
 
   const isOnlineRoom = room?.roomId !== 'LOCAL' && room !== null;
+  const teamLabel = (team: 'A' | 'B') => team === 'A' ? '蓝队' : '红队';
+
 
   const apiRequest = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
       const res = await fetch(path, {
@@ -265,7 +268,7 @@ const App: React.FC = () => {
             })),
             gameStatus: isRoundOver ? 'roundOver' : state.game_status,
             turnTimeLeft: prev.currentTurnIndex === state.turn_index ? prev.turnTimeLeft : TURN_DURATION,
-            roundFinishRanking: state.winners.map((pid, idx) => `${idx + 1}. ${mergedPlayers[pid]?.name || `玩家${pid + 1}`}(${mergedPlayers[pid]?.team || 'A'}队)`),
+            roundFinishRanking: state.winners.map((pid, idx) => `${idx + 1}. ${mergedPlayers[pid]?.name || `玩家${pid + 1}`}(${teamLabel(mergedPlayers[pid]?.team || 'A')})`),
             teamBattleSummary: prev.teamBattleSummary
           };
 
@@ -574,8 +577,9 @@ ${url}
     }
 
     // Bot / Disconnect / Spectated / Timeout / AutoPlayed Turn
-    if (!isTimeout) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+    const thinkMs = isAuto ? 5000 : (isTimeout ? 0 : 1000);
+    if (thinkMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, thinkMs));
     }
     
     // Check if it's a "free turn" (passCount reached limit or no history)
@@ -940,6 +944,11 @@ ${url}
 
   // Online timeout hosting: after countdown ends, auto play/pass for current player
   useEffect(() => {
+    if (onlineAutoActionRef.current) {
+      clearTimeout(onlineAutoActionRef.current);
+      onlineAutoActionRef.current = null;
+    }
+
     if (!isOnlineRoom || !room || gameState.gameStatus !== 'playing') return;
     if (isSpectator || gameState.currentTurnIndex !== myPlayerId) return;
     if (gameState.turnTimeLeft > 0) return;
@@ -967,7 +976,18 @@ ${url}
       }
     };
 
-    doAutoAction();
+    const me = gameState.players[myPlayerId];
+    const delayMs = me?.isAutoPlayed ? 5000 : 0;
+    onlineAutoActionRef.current = setTimeout(() => {
+      doAutoAction();
+    }, delayMs);
+
+    return () => {
+      if (onlineAutoActionRef.current) {
+        clearTimeout(onlineAutoActionRef.current);
+        onlineAutoActionRef.current = null;
+      }
+    };
   }, [
     isOnlineRoom,
     room?.roomId,
@@ -1038,12 +1058,12 @@ ${url}
             roundFinishRanking: [...prev.players]
               .filter(p => p.finishOrder !== null)
               .sort((a, b) => (a.finishOrder || 99) - (b.finishOrder || 99))
-              .map(p => `${p.finishOrder}. ${p.name}(${p.team}队)`),
+              .map(p => `${p.finishOrder}. ${p.name}(${teamLabel(p.team)})`),
             teamBattleSummary: {
               teamA: prev.teamBattleSummary.teamA + (winningTeam === 'A' ? 1 : 0),
               teamB: prev.teamBattleSummary.teamB + (winningTeam === 'B' ? 1 : 0)
             },
-            logs: [`本局结束：${winningTeam}队胜利。`, ...prev.logs].slice(0, 50)
+            logs: [`本局结束：${teamLabel(winningTeam)}胜利。`, ...prev.logs].slice(0, 50)
         }));
         setView('score_summary');
     }
@@ -1352,7 +1372,7 @@ ${url}
                                   {p.name[0]}
                               </div>
                               <span className="text-xs truncate max-w-full px-1">{p.name}</span>
-                              <span className="text-[10px] text-gray-400">{p.team === 'A' ? 'A队' : 'B队'}</span>
+                              <span className="text-[10px] text-gray-400">{p.team === 'A' ? '蓝队' : '红队'}</span>
                               
                               {p.isReady && <span className="absolute top-2 right-2 text-green-400 text-xs">✔</span>}
                           {p.isBot && !isSpectator && p.id !== myPlayerId && (
@@ -1439,13 +1459,13 @@ ${url}
                    <div className="mb-8">
                        <h3 className="font-bold border-b border-gray-600 pb-2 mb-2">历史战绩</h3>
                        <div className="text-sm mb-2 text-center text-yellow-300">
-                         累计胜场：A队 {gameState.teamBattleSummary.teamA} 次 · B队 {gameState.teamBattleSummary.teamB} 次
+                         累计胜场：蓝队 {gameState.teamBattleSummary.teamA} 次 · 红队 {gameState.teamBattleSummary.teamB} 次
                        </div>
                        <div className="max-h-40 overflow-y-auto text-sm space-y-1">
                            {gameState.scores.map((s, i) => (
                                <div key={i} className="flex justify-between px-4">
                                    <span>第 {s.round} 局</span>
-                                   <span>{s.winnerTeam === 'A' ? 'A队胜' : s.winnerTeam === 'B' ? 'B队胜' : '平'}</span>
+                                   <span>{s.winnerTeam === 'A' ? '蓝队胜' : s.winnerTeam === 'B' ? '红队胜' : '平'}</span>
                                </div>
                            ))}
                        </div>
@@ -1487,9 +1507,14 @@ ${url}
                         <span className="text-[10px] bg-blue-900 px-1 rounded">R{gameState.currentRound}</span>
                         {room?.roomId !== 'LOCAL' && <span className="text-[10px] text-gray-400 ml-1">📋</span>}
                     </div>
-                    <div className="flex gap-2 text-[10px] md:text-sm">
-                        <span className="text-blue-400 font-bold">A队: {gameState.players.filter(p => p.team === 'A' && p.isFinished).length} 完</span>
-                        <span className="text-red-400 font-bold">B队: {gameState.players.filter(p => p.team === 'B' && p.isFinished).length} 完</span>
+                    <div className="flex flex-col gap-0.5 text-[10px] md:text-sm">
+                        <div className="flex gap-2">
+                            <span className="text-blue-400 font-bold">蓝队: {gameState.players.filter(p => p.team === 'A' && p.isFinished).length} 完</span>
+                            <span className="text-red-400 font-bold">红队: {gameState.players.filter(p => p.team === 'B' && p.isFinished).length} 完</span>
+                        </div>
+                        <div className="text-[10px] text-yellow-300">
+                            总比分 蓝队 {gameState.teamBattleSummary.teamA} : {gameState.teamBattleSummary.teamB} 红队
+                        </div>
                     </div>
                 </div>
             </div>
