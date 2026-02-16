@@ -48,6 +48,8 @@ class Room:
     last_hand: Optional[PlayedHand] = None
     pass_count: int = 0
     winners: List[int] = field(default_factory=list)
+    hand_history: List[PlayedHand] = field(default_factory=list)
+    spectator_names: List[str] = field(default_factory=list)
     logs: List[str] = field(default_factory=list)
     updated_at: float = field(default_factory=time.time)
 
@@ -132,6 +134,7 @@ def start_game(room: Room):
     room.last_hand = None
     room.pass_count = 0
     room.winners = []
+    room.hand_history = []
     room.logs.append(f"游戏开始，{room.players[starter].name} 持有红桃4先手")
 
 
@@ -146,14 +149,62 @@ def serialize(room: Room, viewer_id: Optional[int] = None):
 
 
 def join_room(room: Room, name: str):
+    if room.game_status != "waiting":
+        room.logs.append(f"{name} 以观战身份进入房间")
+        return 0, True
+
+    if name in room.spectator_names:
+        room.logs.append(f"{name} 仅可观战")
+        return 0, True
+
     for p in room.players:
         if p.is_bot:
             p.name = name
             p.is_bot = False
             p.ready = False
             room.logs.append(f"{name} 加入了房间")
-            return p.id
-    return None
+            return p.id, False
+    return None, False
+
+
+def leave_room(room: Room, player_id: int):
+    if player_id < 0 or player_id >= len(room.players):
+        return False, "玩家不存在"
+
+    leaver = room.players[player_id]
+    if leaver.is_bot:
+        return True, "ok"
+
+    leaver_name = leaver.name
+    if leaver_name not in room.spectator_names:
+        room.spectator_names.append(leaver_name)
+
+    if room.host_id == player_id and room.game_status == "playing":
+        room.game_status = "round_over"
+        room.logs.append(f"房主 {leaver_name} 退出，当前对局直接结束")
+        room.updated_at = time.time()
+        return True, "ok"
+
+    leaver.is_bot = True
+    leaver.ready = True
+    room.logs.append(f"{leaver_name} 退出房间，已切换为电脑托管")
+
+    if room.host_id == player_id:
+        for p in room.players:
+            if not p.is_bot:
+                room.host_id = p.id
+                room.logs.append(f"新房主为 {p.name}")
+                break
+
+    if room.game_status == "playing" and room.turn_index == player_id and not leaver.finished:
+        mv = _auto_move(leaver.hand, room.last_hand)
+        if mv:
+            apply_action(room, leaver.id, "play", [c.id for c in mv])
+        else:
+            apply_action(room, leaver.id, "pass", [])
+
+    room.updated_at = time.time()
+    return True, "ok"
 
 
 def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[List[str]] = None):
@@ -176,6 +227,8 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
         cur.hand = [c for c in cur.hand if c.id not in set(card_ids)]
         t, v = _analyze(selected)
         room.last_hand = PlayedHand(player_id, selected, t, v)
+        room.hand_history.append(room.last_hand)
+        room.hand_history = room.hand_history[-30:]
         room.pass_count = 0
         room.logs.append(f"{cur.name} 出了 {len(selected)} 张牌")
         if not cur.hand and cur.id not in room.winners:
