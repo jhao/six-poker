@@ -86,6 +86,7 @@ const App: React.FC = () => {
   });
   const [pendingAction, setPendingAction] = useState<'create' | 'join' | 'single' | null>(null);
   const [pendingSingleMode, setPendingSingleMode] = useState<'prompt' | 'new' | 'load'>('prompt');
+  const [noticeMessage, setNoticeMessage] = useState<string>('');
 
   // Game Logic State
   const [gameState, setGameState] = useState<GameState>({
@@ -182,6 +183,7 @@ const App: React.FC = () => {
 
   const isOnlineRoom = room?.roomId !== 'LOCAL' && room !== null;
   const teamLabel = (team: 'A' | 'B') => team === 'A' ? '蓝队' : '红队';
+  const showNotice = (message: string) => setNoticeMessage(message);
 
 
   const apiRequest = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
@@ -332,7 +334,7 @@ const App: React.FC = () => {
       setInputPassword(data.password);
       setView('room_waiting');
     } catch (error) {
-      alert(error instanceof Error ? error.message : '创建房间失败');
+      showNotice(error instanceof Error ? error.message : '创建房间失败');
     }
   };
 
@@ -343,7 +345,7 @@ const App: React.FC = () => {
         return;
     }
     if (inputRoomId.length !== 4) {
-      alert('请输入4位房间号');
+      showNotice('请输入4位房间号');
       return;
     }
 
@@ -372,11 +374,11 @@ const App: React.FC = () => {
         }))
       });
       if (data.is_spectator) {
-        alert('当前为观战模式，只能观看。');
+        showNotice('当前为观战模式，只能观看。');
       }
       setView('room_waiting');
     } catch (error) {
-      alert(error instanceof Error ? error.message : '加入房间失败');
+      showNotice(error instanceof Error ? error.message : '加入房间失败');
     }
   };
 
@@ -384,7 +386,7 @@ const App: React.FC = () => {
       if (!room) return;
       const url = `${window.location.origin}?room=${room.roomId}`;
       navigator.clipboard.writeText(url).then(() => {
-          alert(`邀请链接已复制：
+          showNotice(`邀请链接已复制：
 ${url}
 
 对方进入需要输入密码：${room.password}`);
@@ -398,7 +400,7 @@ ${url}
 密码: ${room.password || '无'}
 加入链接: ${url}`;
       navigator.clipboard.writeText(info).then(() => {
-          alert('房间信息已复制！');
+          showNotice('房间信息已复制！');
       });
   };
 
@@ -413,7 +415,7 @@ ${url}
                 ready: !me?.isReady
             });
         } catch (error) {
-            alert(error instanceof Error ? error.message : '准备状态更新失败');
+            showNotice(error instanceof Error ? error.message : '准备状态更新失败');
         }
         return;
     }
@@ -440,7 +442,7 @@ ${url}
       });
       setMyPlayerId(targetSeatId);
     } catch (error) {
-      alert(error instanceof Error ? error.message : '换座失败');
+      showNotice(error instanceof Error ? error.message : '换座失败');
     }
   };
 
@@ -460,7 +462,7 @@ ${url}
             content: msg
           });
         } catch (error) {
-          alert(error instanceof Error ? error.message : '发送消息失败');
+          showNotice(error instanceof Error ? error.message : '发送消息失败');
         }
         return;
       }
@@ -484,7 +486,7 @@ ${url}
       try {
         await apiRequest(`/api/rooms/${room.roomId}/start`, 'POST', {});
       } catch (error) {
-        alert(error instanceof Error ? error.message : '开始失败');
+        showNotice(error instanceof Error ? error.message : '开始失败');
       }
       return;
     }
@@ -492,7 +494,7 @@ ${url}
     // Check if everyone is ready
     const allReady = room.players.every(p => !p.isHuman || p.isReady); // Simple check: Humans must be ready
     if (!allReady) {
-        alert('还有玩家未准备，无法开始！');
+        showNotice('还有玩家未准备，无法开始！');
         return;
     }
 
@@ -741,7 +743,7 @@ ${url}
                   content: emote.content
               });
           } catch (error) {
-              alert(error instanceof Error ? error.message : '发送消息失败');
+              showNotice(error instanceof Error ? error.message : '发送消息失败');
           }
           return;
       }
@@ -780,14 +782,14 @@ ${url}
         });
         setSelectedCards([]);
       } catch (error) {
-        alert(error instanceof Error ? error.message : '出牌失败');
+        showNotice(error instanceof Error ? error.message : '出牌失败');
       }
       return;
     }
 
     const analysis = analyzeHand(selectedCards);
     if (analysis.type === HandType.Invalid) {
-      alert('无效的牌型组合！');
+      showNotice('无效的牌型组合！');
       return;
     }
 
@@ -804,7 +806,7 @@ ${url}
     const effectiveLastHand = isFreeTurn ? null : gameState.handHistory[gameState.handHistory.length - 1];
 
     if (effectiveLastHand && !canBeat(selectedCards, effectiveLastHand)) {
-      alert('你的牌必须大于上家且牌型一致！');
+      showNotice('你的牌必须大于上家且牌型一致！');
       return;
     }
     playCards(myPlayerId, selectedCards);
@@ -821,7 +823,7 @@ ${url}
         });
         setSelectedCards([]);
       } catch (error) {
-        alert(error instanceof Error ? error.message : '过牌失败');
+        showNotice(error instanceof Error ? error.message : '过牌失败');
       }
       return;
     }
@@ -837,7 +839,7 @@ ${url}
     const isFreeTurn = gameState.handHistory.length === 0 || gameState.passCount >= threshold;
 
     if (isFreeTurn) {
-      alert('新的一轮，你必须出牌，不能过！');
+      showNotice('新的一轮，你必须出牌，不能过！');
       return;
     }
     passTurn(myPlayerId);
@@ -848,7 +850,7 @@ ${url}
   const handleLeaveGame = async (force: boolean = false) => {
       if (room?.roomId === 'LOCAL') {
           // Saving is handled by useEffect
-          alert("游戏进度已保存，下次进入将继续。");
+          showNotice("游戏进度已保存，下次进入将继续。");
           setView('home');
       } else {
           // Host Restrictions
@@ -1164,10 +1166,10 @@ ${url}
       if (!room || room.roomId === 'LOCAL' || room.hostId !== myPlayerId) return;
       try {
           await apiRequest(`/api/rooms/${room.roomId}/dissolve`, 'POST', { player_id: myPlayerId });
-          alert('房间已解散');
+          showNotice('房间已解散');
           handleLeaveGame(true);
       } catch (error) {
-          alert(error instanceof Error ? error.message : '解散房间失败');
+          showNotice(error instanceof Error ? error.message : '解散房间失败');
       }
   };
 
@@ -1431,7 +1433,7 @@ ${url}
                    <div className="mb-6 space-y-2">
                        {gameState.scores.slice(-1).map((s, i) => (
                            <div key={i} className="text-xl">
-                               {s.winnerTeam === 'Draw' ? '平局' : `队伍 ${s.winnerTeam} 获胜!`}
+                               {s.winnerTeam === 'Draw' ? '平局' : `${teamLabel(s.winnerTeam)}获胜!`}
                                <div className="text-sm text-gray-400 mt-1">{s.details}</div>
                            </div>
                        ))}
@@ -1628,6 +1630,20 @@ ${url}
           <div className="absolute bottom-10 left-0 w-full text-center text-yellow-400 font-bold bg-black/50 py-2 animate-pulse pointer-events-none z-40">
               当前为观战模式
           </div>
+      )}
+
+      {noticeMessage && (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setNoticeMessage('')}>
+          <div className="max-w-lg w-full bg-slate-800 border border-slate-600 rounded-2xl shadow-2xl p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="text-white whitespace-pre-line break-words">{noticeMessage}</div>
+            <button
+              onClick={() => setNoticeMessage('')}
+              className="mt-5 px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold text-white"
+            >
+              我知道了
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
