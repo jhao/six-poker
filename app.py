@@ -87,6 +87,18 @@ def api_swap_seat(room_id):
         return jsonify({"error": msg}), 400
     return jsonify({"ok": True})
 
+
+@app.post('/api/rooms/<room_id>/dissolve')
+def api_dissolve_room(room_id):
+    room = rooms.get(room_id)
+    if not room:
+        return jsonify({"error": "房间不存在"}), 404
+    pid = int((request.json or {}).get('player_id', -1))
+    if pid != room.host_id:
+        return jsonify({"error": "仅房主可解散房间"}), 403
+    del rooms[room_id]
+    return jsonify({"ok": True})
+
 @app.post('/api/rooms/<room_id>/action')
 def api_action(room_id):
     room = rooms.get(room_id)

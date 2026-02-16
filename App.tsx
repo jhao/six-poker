@@ -242,6 +242,7 @@ const App: React.FC = () => {
       }));
 
       if (state.game_status === 'waiting') setView('room_waiting');
+      else if (state.game_status === 'round_over') setView('score_summary');
       else setView('game');
   }, [isSpectator, myPlayerId, room?.password]);
 
@@ -1012,6 +1013,17 @@ ${url}
       startGame();
   };
 
+  const dissolveRoom = async () => {
+      if (!room || room.roomId === 'LOCAL' || room.hostId !== myPlayerId) return;
+      try {
+          await apiRequest(`/api/rooms/${room.roomId}/dissolve`, 'POST', { player_id: myPlayerId });
+          alert('房间已解散');
+          handleLeaveGame(true);
+      } catch (error) {
+          alert(error instanceof Error ? error.message : '解散房间失败');
+      }
+  };
+
   const toggleDisconnect = (pid: number) => {
       if (pid === myPlayerId) return;
       setGameState(prev => ({
@@ -1276,6 +1288,9 @@ ${url}
                                <div className="text-sm text-gray-400 mt-1">{s.details}</div>
                            </div>
                        ))}
+                       {gameState.scores.length === 0 && (
+                           <div className="text-sm text-gray-300">本轮已结束，请由房主选择继续游戏或解散房间。</div>
+                       )}
                    </div>
 
                    <div className="mb-8">
@@ -1293,9 +1308,14 @@ ${url}
                    <div className="flex gap-4 justify-center">
                         <button onClick={() => handleLeaveGame(true)} className="px-6 py-2 bg-gray-600 rounded">退出房间</button>
                         {(!room || room.roomId === 'LOCAL' || room.hostId === myPlayerId) ? (
-                            <button onClick={continueGame} className="px-6 py-2 bg-green-600 rounded font-bold">下一局</button>
+                          <>
+                            <button onClick={continueGame} className="px-6 py-2 bg-green-600 rounded font-bold">继续游戏</button>
+                            {room && room.roomId !== 'LOCAL' && (
+                              <button onClick={dissolveRoom} className="px-6 py-2 bg-red-700 rounded font-bold">解散房间</button>
+                            )}
+                          </>
                         ) : (
-                            <div className="text-gray-400 flex items-center px-4">等待房主继续...</div>
+                            <div className="text-gray-400 flex items-center px-4">等待房主选择继续游戏或解散房间...</div>
                         )}
                    </div>
                </div>

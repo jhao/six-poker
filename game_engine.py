@@ -9,6 +9,10 @@ RANK_VALUES = {rank: i for i, rank in enumerate(RANKS)}
 TEAM_A = {0, 2, 4}
 
 
+def _team_for_seat(seat_id: int) -> str:
+    return "A" if seat_id in TEAM_A else "B"
+
+
 @dataclass
 class Card:
     id: str
@@ -116,8 +120,8 @@ def _auto_move(hand: List[Card], last: Optional[PlayedHand]) -> Optional[List[Ca
 def create_room(name: str) -> Room:
     rid = str(random.randint(1000, 9999))
     pwd = str(random.randint(1000, 9999))
-    players = [Player(i, f"空位 {i+1}", "A" if i in TEAM_A else "B", is_bot=True, ready=False) for i in range(6)]
-    players[0] = Player(0, name, "A", is_bot=False, ready=False)
+    players = [Player(i, f"空位 {i+1}", _team_for_seat(i), is_bot=True, ready=False) for i in range(6)]
+    players[0] = Player(0, name, _team_for_seat(0), is_bot=False, ready=False)
     return Room(rid, pwd, 0, players, logs=[f"房主 {name} 创建了房间"])
 
 
@@ -227,6 +231,8 @@ def swap_seat(room: Room, player_id: int, target_seat_id: int):
     room.players[player_id], room.players[target_seat_id] = room.players[target_seat_id], room.players[player_id]
     room.players[player_id].id = player_id
     room.players[target_seat_id].id = target_seat_id
+    room.players[player_id].team = _team_for_seat(player_id)
+    room.players[target_seat_id].team = _team_for_seat(target_seat_id)
 
     if room.host_id == player_id:
         room.host_id = target_seat_id
@@ -277,7 +283,13 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
         room.turn_index = (room.turn_index + 1) % 6
         if not room.players[room.turn_index].finished:
             break
-    if room.pass_count >= len(alive) - 1:
+    pass_threshold = len(alive) - 1
+    if room.last_hand:
+        last_player = room.players[room.last_hand.player_id]
+        if last_player.finished:
+            pass_threshold = len(alive)
+
+    if room.pass_count >= pass_threshold:
         room.last_hand = None
         room.pass_count = 0
         room.logs.append("一轮过牌，重置牌权")
