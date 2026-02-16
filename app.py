@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, render_template, request
-from game_engine import Room, apply_action, create_room, join_room, serialize, start_game
+from game_engine import Room, apply_action, create_room, join_room, leave_room, serialize, start_game
 
 app = Flask(__name__)
 rooms: dict[str, Room] = {}
@@ -26,10 +26,22 @@ def api_join_room(room_id):
     body = request.json or {}
     if room.password and body.get('password') != room.password:
         return jsonify({"error": "密码错误"}), 403
-    pid = join_room(room, body.get('name', '玩家'))
+    pid, spectator = join_room(room, body.get('name', '玩家'))
     if pid is None:
         return jsonify({"error": "房间已满"}), 409
-    return jsonify({"player_id": pid})
+    return jsonify({"player_id": pid, "is_spectator": spectator})
+
+
+@app.post('/api/rooms/<room_id>/leave')
+def api_leave(room_id):
+    room = rooms.get(room_id)
+    if not room:
+        return jsonify({"error": "房间不存在"}), 404
+    pid = int((request.json or {}).get('player_id', -1))
+    ok, msg = leave_room(room, pid)
+    if not ok:
+        return jsonify({"error": msg}), 400
+    return jsonify({"ok": True})
 
 
 @app.post('/api/rooms/<room_id>/ready')

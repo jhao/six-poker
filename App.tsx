@@ -16,6 +16,7 @@ type BackendRoomState = {
   game_status: 'waiting' | 'playing' | 'round_over';
   turn_index: number;
   last_hand: BackendHand | null;
+  hand_history?: BackendHand[];
   pass_count: number;
   winners: number[];
   logs: string[];
@@ -196,7 +197,7 @@ const App: React.FC = () => {
           name: p.name,
           team: p.team,
           hand: p.hand.map(toLocalCard),
-          isHuman: p.id === myPlayerId,
+          isHuman: !isSpectator && p.id === myPlayerId,
           isFinished: p.finished,
           finishOrder: null,
           isReady: p.ready,
@@ -205,14 +206,18 @@ const App: React.FC = () => {
           seatIndex: idx
       }));
 
-      const history: PlayedHand[] = state.last_hand ? [{
-          cards: state.last_hand.cards.map(toLocalCard),
-          type: backendTypeToLocal(state.last_hand.hand_type),
-          mainRankValue: state.last_hand.main_rank,
-          playerId: state.last_hand.player_id,
-          playerName: players[state.last_hand.player_id]?.name || '未知玩家',
-          playerTeam: players[state.last_hand.player_id]?.team || 'A'
-      }] : [];
+      const rawHistory = state.hand_history && state.hand_history.length > 0
+          ? state.hand_history
+          : (state.last_hand ? [state.last_hand] : []);
+
+      const history: PlayedHand[] = rawHistory.map(hand => ({
+          cards: hand.cards.map(toLocalCard),
+          type: backendTypeToLocal(hand.hand_type),
+          mainRankValue: hand.main_rank,
+          playerId: hand.player_id,
+          playerName: players[hand.player_id]?.name || '未知玩家',
+          playerTeam: players[hand.player_id]?.team || 'A'
+      }));
 
       setRoom({
           roomId: state.room_id,
@@ -237,7 +242,7 @@ const App: React.FC = () => {
 
       if (state.game_status === 'waiting') setView('room_waiting');
       else setView('game');
-  }, [myPlayerId, room?.password]);
+  }, [isSpectator, myPlayerId, room?.password]);
 
   const handleCreateRoom = async () => {
     if (!userName) {
@@ -289,9 +294,9 @@ const App: React.FC = () => {
     }
 
     try {
-      const data = await apiRequest(`/api/rooms/${inputRoomId}/join`, 'POST', { name: userName, password: inputPassword }) as { player_id: number };
+      const data = await apiRequest(`/api/rooms/${inputRoomId}/join`, 'POST', { name: userName, password: inputPassword }) as { player_id: number; is_spectator?: boolean };
       setMyPlayerId(data.player_id);
-      setIsSpectator(false);
+      setIsSpectator(Boolean(data.is_spectator));
       setRoom({
         roomId: inputRoomId,
         hostId: 0,
@@ -311,6 +316,9 @@ const App: React.FC = () => {
           seatIndex: i
         }))
       });
+      if (data.is_spectator) {
+        alert('当前为观战模式，只能观看。');
+      }
       setView('room_waiting');
     } catch (error) {
       alert(error instanceof Error ? error.message : '加入房间失败');
@@ -625,10 +633,12 @@ ${url}
   };
 
   const sendEmote = (targetId: number, content: string) => {
+      const senderName = gameState.players[myPlayerId]?.name || userName || `玩家${myPlayerId + 1}`;
+      const targetName = gameState.players[targetId]?.name || `玩家${targetId + 1}`;
       const emote: EmoteMessage = {
           senderId: myPlayerId,
           targetId,
-          content,
+          content: `${senderName}向${targetName}发送的：${content}`,
           timestamp: Date.now()
       };
       setGameState(prev => ({
@@ -730,7 +740,7 @@ ${url}
   };
 
 
-  const handleLeaveGame = (force: boolean = false) => {
+  const handleLeaveGame = async (force: boolean = false) => {
       if (room?.roomId === 'LOCAL') {
           // Saving is handled by useEffect
           alert("游戏进度已保存，下次进入将继续。");
@@ -751,6 +761,11 @@ ${url}
           const confirmLeave = force || window.confirm(isSpectator ? "退出观战？" : "确定退出房间吗？");
           if (confirmLeave) {
              if (room?.roomId) {
+                 try {
+                     await apiRequest(`/api/rooms/${room.roomId}/leave`, 'POST', { player_id: myPlayerId });
+                 } catch (error) {
+                     console.error(error);
+                 }
                  const list = JSON.parse(localStorage.getItem('za6_spectate_list') || '[]');
                  if (!list.includes(room.roomId) && !isSpectator) {
                      list.push(room.roomId);
@@ -778,7 +793,8 @@ ${url}
     let active = true;
     const tick = async () => {
       try {
-        const state = await apiRequest(`/api/rooms/${room.roomId}/state?player_id=${myPlayerId}`) as BackendRoomState;
+        const query = isSpectator ? '' : `?player_id=${myPlayerId}`;
+        const state = await apiRequest(`/api/rooms/${room.roomId}/state${query}`) as BackendRoomState;
         if (!active) return;
         syncFromBackendState(state);
       } catch (error) {
@@ -794,7 +810,7 @@ ${url}
       active = false;
       clearInterval(timer);
     };
-  }, [room?.roomId, myPlayerId, apiRequest, syncFromBackendState]);
+  }, [room?.roomId, myPlayerId, isSpectator, apiRequest, syncFromBackendState]);
 
   // Timer Effect & Timeout AutoPlay Logic
   useEffect(() => {
