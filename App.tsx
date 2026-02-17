@@ -75,7 +75,9 @@ const toLocalCard = (c: BackendCard): Card => {
 const App: React.FC = () => {
   const API_BASE_URL = (() => {
     const rawBase = (import.meta.env.VITE_API_BASE_URL || '').trim();
-    if (!rawBase) return '';
+    if (!rawBase) {
+      return `${window.location.origin}/six-poker`;
+    }
     if (window.location.protocol === 'https:' && rawBase.startsWith('http://')) {
       return rawBase.replace(/^http:\/\//, 'https://').replace(/\/$/, '');
     }
