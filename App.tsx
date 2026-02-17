@@ -192,7 +192,11 @@ const App: React.FC = () => {
 
 
   const apiRequest = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
-      const res = await fetch(path, {
+      const requestPath = /^https?:\/\//.test(path)
+          ? path
+          : path.replace(/^\//, '');
+
+      const res = await fetch(requestPath, {
           method,
           headers: { 'Content-Type': 'application/json' },
           body: body ? JSON.stringify(body) : undefined
