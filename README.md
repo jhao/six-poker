@@ -14,7 +14,7 @@
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python app.py
+python app.py --admin-username admin --admin-password 123456 --allowed-creators 张三,李四
 ```
 
 启动后访问：
@@ -26,6 +26,22 @@ python app.py
 - 页面由 Flask 返回 `templates/index.html`。
 - 浏览器脚本来自 `static/app.js`。
 - 前端通过 `/api/*` 与后端通信，轮询间隔为 1 秒。
+
+
+
+### 1.3 后台管理入口
+
+启动服务后可访问：
+
+- `http://localhost:5008/admin`
+
+管理员账号密码由启动参数 `--admin-username` 与 `--admin-password` 指定。
+
+后台能力：
+
+- 管理“允许创建房间”的昵称白名单
+- 查看全部房间（房间号、密码、玩家状态、出牌与比分状态）
+- 强制结束并关闭任意房间
 
 ### 1.2 前端独立开发启动（可选）
 
@@ -85,7 +101,7 @@ docker stop six-poker && docker rm six-poker
 
 ```bash
 pip install -r requirements.txt
-python app.py
+python app.py --admin-username admin --admin-password 123456 --allowed-creators 张三,李四
 ```
 
 如果你在服务器上运行，建议使用 systemd/supervisor 做进程守护，并通过 Nginx 反向代理到 `5000` 端口。

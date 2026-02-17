@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>砸六家后台管理</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4">
+  <div class="max-w-6xl mx-auto space-y-4">
+    <h1 class="text-3xl font-bold text-yellow-400">砸六家后台管理</h1>
+
+    <section id="loginPanel" class="bg-slate-800 p-4 rounded space-y-3">
+      <h2 class="text-xl font-semibold">管理员登录</h2>
+      <div class="grid md:grid-cols-3 gap-2">
+        <input id="username" class="px-3 py-2 rounded bg-slate-700" placeholder="用户名" />
+        <input id="password" type="password" class="px-3 py-2 rounded bg-slate-700" placeholder="密码" />
+        <button id="loginBtn" class="px-4 py-2 bg-blue-600 rounded">登录</button>
+      </div>
+      <div id="loginMsg" class="text-sm text-red-300"></div>
+    </section>
+
+    <section id="adminPanel" class="hidden space-y-4">
+      <div class="flex justify-end">
+        <button id="logoutBtn" class="px-4 py-2 bg-gray-600 rounded">退出登录</button>
+      </div>
+
+      <div class="bg-slate-800 p-4 rounded space-y-3">
+        <h2 class="text-xl font-semibold">可创建房间昵称管理</h2>
+        <div class="flex gap-2">
+          <input id="creatorName" class="px-3 py-2 rounded bg-slate-700 flex-1" placeholder="输入昵称" />
+          <button id="addCreatorBtn" class="px-4 py-2 bg-emerald-600 rounded">授权</button>
+        </div>
+        <div id="creators" class="flex flex-wrap gap-2"></div>
+      </div>
+
+      <div class="bg-slate-800 p-4 rounded space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-semibold">房间管理（进行中/等待中）</h2>
+          <button id="refreshRooms" class="px-3 py-1 bg-indigo-600 rounded">刷新</button>
+        </div>
+        <div id="rooms" class="space-y-3"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function api(path, method = 'GET', body) {
+      const response = await fetch(path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '请求失败');
+      return data;
+    }
+
+    async function checkSession() {
+      const data = await api('/api/admin/session');
+      if (data.logged_in) {
+        $('loginPanel').classList.add('hidden');
+        $('adminPanel').classList.remove('hidden');
+        await Promise.all([loadCreators(), loadRooms()]);
+      }
+    }
+
+    async function loadCreators() {
+      const data = await api('/api/admin/creators');
+      $('creators').innerHTML = data.allowed_creators.map(name => `
+        <span class="px-2 py-1 rounded bg-slate-700 inline-flex items-center gap-2">
+          ${name}
+          <button class="text-red-300" onclick="removeCreator('${name}')">移除</button>
+        </span>
+      `).join('') || '<span class="text-gray-400">暂无授权昵称</span>';
+    }
+
+    async function removeCreator(name) {
+      await api('/api/admin/creators', 'DELETE', { name });
+      await loadCreators();
+    }
+
+    async function loadRooms() {
+      const data = await api('/api/admin/rooms');
+      $('rooms').innerHTML = data.rooms.map(room => {
+        const playerRows = room.players.map(player => `
+          <div class="text-xs text-gray-300">#${player.id} ${player.name} ${player.is_bot ? '(机器人)' : ''} ${player.finished ? '✅出完' : ''} 手牌:${player.hand_count}</div>
+        `).join('');
+
+        return `
+          <div class="border border-slate-600 rounded p-3 space-y-2">
+            <div class="flex flex-wrap justify-between gap-2">
+              <div>
+                <div class="font-bold text-yellow-300">房间 ${room.room_id} / 密码 ${room.password}</div>
+                <div class="text-sm text-gray-300">状态: ${room.game_status} ｜ 回合玩家: ${room.turn_player} ｜ 过牌计数: ${room.pass_count}</div>
+                <div class="text-sm text-gray-300">比分(本局出完人数): 蓝队 ${room.team_score.A} : 红队 ${room.team_score.B}</div>
+              </div>
+              <div class="flex gap-2 h-fit">
+                <button class="px-3 py-1 bg-blue-700 rounded" onclick="viewRoom('${room.room_id}')">查看详情</button>
+                <button class="px-3 py-1 bg-red-700 rounded" onclick="closeRoom('${room.room_id}')">结束并关闭</button>
+              </div>
+            </div>
+            <div class="grid md:grid-cols-2 gap-2">${playerRows}</div>
+          </div>
+        `;
+      }).join('') || '<div class="text-gray-400">暂无房间</div>';
+    }
+
+    async function closeRoom(roomId) {
+      if (!confirm(`确定关闭房间 ${roomId} 吗？`)) return;
+      await api(`/api/admin/rooms/${roomId}/close`, 'POST', {});
+      await loadRooms();
+    }
+
+    async function viewRoom(roomId) {
+      const data = await api(`/api/admin/rooms/${roomId}`);
+      alert(`房间 ${data.summary.room_id}\n密码 ${data.summary.password}\n状态 ${data.summary.game_status}\n最近日志:\n${data.summary.latest_logs.join('\n')}`);
+    }
+
+    $('loginBtn').onclick = async () => {
+      $('loginMsg').textContent = '';
+      try {
+        await api('/api/admin/login', 'POST', {
+          username: $('username').value.trim(),
+          password: $('password').value.trim(),
+        });
+        $('loginPanel').classList.add('hidden');
+        $('adminPanel').classList.remove('hidden');
+        await Promise.all([loadCreators(), loadRooms()]);
+      } catch (error) {
+        $('loginMsg').textContent = error.message;
+      }
+    };
+
+    $('logoutBtn').onclick = async () => {
+      await api('/api/admin/logout', 'POST', {});
+      window.location.reload();
+    };
+
+    $('addCreatorBtn').onclick = async () => {
+      const name = $('creatorName').value.trim();
+      if (!name) return;
+      await api('/api/admin/creators', 'POST', { name });
+      $('creatorName').value = '';
+      await loadCreators();
+    };
+
+    $('refreshRooms').onclick = loadRooms;
+    setInterval(() => {
+      if (!$('adminPanel').classList.contains('hidden')) loadRooms();
+    }, 5000);
+
+    checkSession();
+    window.removeCreator = removeCreator;
+    window.closeRoom = closeRoom;
+    window.viewRoom = viewRoom;
+  </script>
+</body>
+</html>

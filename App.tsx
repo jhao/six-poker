@@ -1540,11 +1540,16 @@ ${url}
                 >
                     <div className="flex items-center gap-2 mb-1">
                         <h1 className="text-sm md:text-lg font-bold text-yellow-400">
-                            {room?.roomId === 'LOCAL' ? '单机' : room?.roomId} {isSpectator ? '(观战)' : ''}
+                            {room?.roomId === 'LOCAL' ? '单机' : `房间号 ${room?.roomId}`} {isSpectator ? '(观战)' : ''}
                         </h1>
                         <span className="text-[10px] bg-blue-900 px-1 rounded">R{gameState.currentRound}</span>
                         {room?.roomId !== 'LOCAL' && <span className="text-[10px] text-gray-400 ml-1">📋</span>}
                     </div>
+                    {room?.roomId !== 'LOCAL' && (
+                      <div className="text-[10px] md:text-xs text-yellow-200 mb-1">
+                        房间密码：{room?.password || '无'}
+                      </div>
+                    )}
                     <div className="flex flex-col gap-0.5 text-[10px] md:text-sm">
                         <div className="flex gap-2">
                             <span className="text-blue-400 font-bold">蓝队: {gameState.players.filter(p => p.team === 'A' && p.isFinished).length} 完</span>
