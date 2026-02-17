@@ -2,6 +2,7 @@ let roomId = null;
 let playerId = null;
 let state = null;
 let selected = new Set();
+let roomPassword = "";
 
 const $ = (id) => document.getElementById(id);
 
@@ -21,6 +22,7 @@ $('create').onclick = async () => {
   const data = await api('/api/rooms', 'POST', { name });
   roomId = data.room_id; playerId = data.player_id;
   $('rid').value = roomId; $('pwd').value = data.password;
+  roomPassword = data.password || ''; 
   $('home').classList.add('hidden'); $('room').classList.remove('hidden');
 };
 
@@ -28,6 +30,7 @@ $('join').onclick = async () => {
   const name = $('name').value || '玩家';
   roomId = $('rid').value;
   const data = await api(`/api/rooms/${roomId}/join`, 'POST', { name, password: $('pwd').value });
+  roomPassword = $('pwd').value || ''; 
   playerId = data.player_id;
   $('home').classList.add('hidden'); $('room').classList.remove('hidden');
 };
@@ -52,7 +55,7 @@ $('pass').onclick = async () => {
 
 function render() {
   if (!state) return;
-  $('roomInfo').textContent = `房间 ${state.room_id} | 你的ID: ${playerId} | 状态: ${state.game_status}`;
+  $('roomInfo').textContent = `房间号 ${state.room_id} | 房间密码 ${roomPassword || '无'} | 你的ID: ${playerId} | 状态: ${state.game_status}`;
   $('players').innerHTML = state.players.map(p =>
     `<div class="bg-slate-800 rounded p-2">${p.name} (${p.team}) ${p.ready ? '✅' : '⌛'} ${p.finished ? '🏁' : ''}</div>`).join('');
 
