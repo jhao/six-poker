@@ -5,6 +5,21 @@ app = Flask(__name__)
 rooms: dict[str, Room] = {}
 
 
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+    response.headers['Vary'] = 'Origin'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
+
+
+@app.route('/api/<path:_unused>', methods=['OPTIONS'])
+def api_options(_unused):
+    return ('', 204)
+
 @app.get("/")
 def index():
     return render_template("index.html")
