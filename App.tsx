@@ -209,7 +209,14 @@ const App: React.FC = () => {
   const isOnlineRoom = room?.roomId !== 'LOCAL' && room !== null;
   const teamLabel = (team: 'A' | 'B') => team === 'A' ? '蓝队' : '红队';
   const showNotice = (message: string) => setNoticeMessage(message);
+  const EMOTE_DISPLAY_DURATION_MS = 5000;
 
+  const dismissEmote = useCallback((timestamp: number) => {
+    setGameState(prev => ({
+      ...prev,
+      activeEmotes: prev.activeEmotes.filter(e => e.timestamp !== timestamp)
+    }));
+  }, []);
 
   const apiRequest = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
       const requestPath = /^https?:\/\//.test(path)
@@ -291,12 +298,15 @@ const App: React.FC = () => {
             passCount: state.pass_count,
             winners: state.winners.map(pid => mergedPlayers[pid]?.name || `玩家${pid + 1}`),
             logs: state.logs,
-            activeEmotes: (state.emotes || []).slice(-8).map(e => ({
-              senderId: e.sender_id,
-              targetId: e.target_id,
-              content: e.content,
-              timestamp: e.timestamp
-            })),
+            activeEmotes: (state.emotes || [])
+              .filter(e => Date.now() - e.timestamp <= EMOTE_DISPLAY_DURATION_MS)
+              .slice(-8)
+              .map(e => ({
+                senderId: e.sender_id,
+                targetId: e.target_id,
+                content: e.content,
+                timestamp: e.timestamp
+              })),
             gameStatus: isRoundOver ? 'roundOver' : state.game_status,
             turnTimeLeft: prev.currentTurnIndex === state.turn_index ? prev.turnTimeLeft : (mergedPlayers[state.turn_index]?.isAutoPlayed ? HOSTED_TURN_DURATION : TURN_DURATION),
             roundFinishRanking: state.winners.map((pid, idx) => `${idx + 1}. ${mergedPlayers[pid]?.name || `玩家${pid + 1}`}(${teamLabel(mergedPlayers[pid]?.team || 'A')})`),
@@ -502,11 +512,8 @@ ${url}
       }));
       
       setTimeout(() => {
-          setGameState(prev => ({
-              ...prev,
-              activeEmotes: prev.activeEmotes.filter(e => e.timestamp !== emote.timestamp)
-          }));
-      }, 3000);
+          dismissEmote(emote.timestamp);
+      }, EMOTE_DISPLAY_DURATION_MS);
   };
   const startGame = useCallback(async () => {
     if (!room) return;
@@ -788,11 +795,8 @@ ${url}
           activeEmotes: [...prev.activeEmotes, emote]
       }));
       setTimeout(() => {
-          setGameState(prev => ({
-              ...prev,
-              activeEmotes: prev.activeEmotes.filter(e => e.timestamp !== emote.timestamp)
-          }));
-      }, 3000);
+          dismissEmote(emote.timestamp);
+      }, EMOTE_DISPLAY_DURATION_MS);
   };
 
   const toggleSelectCard = (card: Card) => {
@@ -1402,7 +1406,14 @@ ${url}
                               ${isSpectator || !p.isBot || p.id === myPlayerId ? 'cursor-default' : ''}
                           `}>
                               {pEmote && (
-                                  <div className="absolute -top-10 bg-white text-black text-xs px-4 py-1.5 rounded-lg shadow-lg z-10 animate-bounce min-w-[200px] max-w-[500px] text-center break-words">
+                                  <div
+                                      onClick={(e) => {
+                                          e.stopPropagation();
+                                          dismissEmote(pEmote.timestamp);
+                                      }}
+                                      className="absolute -top-10 bg-white text-black text-xs px-4 py-1.5 rounded-lg shadow-lg z-10 min-w-[200px] max-w-[500px] text-center break-words cursor-pointer select-none animate-emote-fadeout"
+                                      title="点击立即关闭"
+                                  >
                                       {pEmote.content}
                                   </div>
                               )}
@@ -1595,6 +1606,7 @@ ${url}
                handHistory={gameState.tableHistory}
                activeEmotes={gameState.activeEmotes}
                onEmoteSend={sendEmote}
+               onEmoteDismiss={dismissEmote}
                myPlayerId={myPlayerId}
                turnTimeLeft={gameState.turnTimeLeft}
              />
