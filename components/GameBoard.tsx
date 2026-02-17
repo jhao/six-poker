@@ -13,6 +13,8 @@ interface GameBoardProps {
   turnTimeLeft: number;
 }
 
+const MAX_VISIBLE_EMOTE_STACK = 4; // 1 newest + 3 older messages
+
 export const GameBoard: React.FC<GameBoardProps> = ({ 
   players, 
   currentTurnIndex, 
@@ -23,7 +25,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   turnTimeLeft
 }) => {
   const [emoteMenuOpenId, setEmoteMenuOpenId] = useState<number | null>(null);
-  const [dismissedEmoteAt, setDismissedEmoteAt] = useState<number[]>([]);
   const [flyingCardKey, setFlyingCardKey] = useState<string>('');
 
   // Render everyone around the table relative to my seat (me stays at bottom-center).
@@ -63,18 +64,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setEmoteMenuOpenId(null);
   };
 
-  const latestEmote = useMemo(() => {
-    const sorted = [...activeEmotes].sort((a, b) => b.timestamp - a.timestamp);
-    return sorted.find((emote) => !dismissedEmoteAt.includes(emote.timestamp)) || null;
-  }, [activeEmotes, dismissedEmoteAt]);
-
-  useEffect(() => {
-    if (!latestEmote) return;
-    const timer = setTimeout(() => {
-      setDismissedEmoteAt(prev => [...prev, latestEmote.timestamp]);
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, [latestEmote]);
+  const visibleEmoteQueue = useMemo(() => {
+    const sorted = [...activeEmotes].sort((a, b) => a.timestamp - b.timestamp);
+    return sorted.slice(-MAX_VISIBLE_EMOTE_STACK);
+  }, [activeEmotes]);
 
   // Show recent six plays in the pool, latest one as current focus
   const recentPool = handHistory.slice(-6);
@@ -124,13 +117,24 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     <div className="w-full h-full">
       
       {/* --- CENTER STAGE AREA --- */}
-      {latestEmote && (
-        <button
-          onClick={() => setDismissedEmoteAt(prev => [...prev, latestEmote.timestamp])}
-          className="absolute top-10 left-1/2 -translate-x-1/2 z-50 bg-white text-black px-4 py-2 rounded-2xl shadow-lg text-sm font-bold min-w-[240px] max-w-[min(92vw,700px)] break-words text-center"
-        >
-          {renderEmoteContent(latestEmote.content)}
-        </button>
+      {visibleEmoteQueue.length > 0 && (
+        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
+          {visibleEmoteQueue.map((emote, index) => {
+            const isNewest = index === visibleEmoteQueue.length - 1;
+            const messageAge = visibleEmoteQueue.length - 1 - index;
+            const opacityClass = ['opacity-30', 'opacity-45', 'opacity-65', 'opacity-100'][Math.min(messageAge, 3)];
+            const scaleClass = isNewest ? 'scale-100' : 'scale-95';
+
+            return (
+              <div
+                key={emote.timestamp}
+                className={`bg-white text-black px-4 py-2 rounded-2xl shadow-lg text-sm font-bold min-w-[240px] max-w-[min(92vw,700px)] break-words text-center transition-all duration-300 ${opacityClass} ${scaleClass}`}
+              >
+                {renderEmoteContent(emote.content)}
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {currentHand && flyingCardKey && (
