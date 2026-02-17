@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
         proxy: {
-          '/api': {
+          '/six-poker/api': {
             target: 'http://47.93.33.214:5008',
             changeOrigin: true,
           },
