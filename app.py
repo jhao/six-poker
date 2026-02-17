@@ -1,6 +1,8 @@
 import argparse
+import json
 import secrets
 from functools import wraps
+from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request, session
@@ -10,8 +12,32 @@ app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 rooms: dict[str, Room] = {}
 allowed_creators: set[str] = set()
+allowed_creators_file = Path("data/allowed_creators.json")
 admin_username = "admin"
 admin_password = "admin"
+
+
+def _save_allowed_creators() -> None:
+    allowed_creators_file.parent.mkdir(parents=True, exist_ok=True)
+    allowed_creators_file.write_text(
+        json.dumps(sorted(allowed_creators), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _load_allowed_creators() -> set[str]:
+    if not allowed_creators_file.exists():
+        return set()
+
+    try:
+        raw = json.loads(allowed_creators_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+    if not isinstance(raw, list):
+        return set()
+
+    return {str(name).strip() for name in raw if str(name).strip()}
 
 
 def _is_admin_logged_in() -> bool:
@@ -77,7 +103,7 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
     response.headers['Vary'] = 'Origin'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS, DELETE'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, OPTIONS, DELETE'
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
 
@@ -135,6 +161,7 @@ def api_admin_add_creator():
     if not name:
         return jsonify({"error": "昵称不能为空"}), 400
     allowed_creators.add(name)
+    _save_allowed_creators()
     return jsonify({"ok": True, "allowed_creators": sorted(allowed_creators)})
 
 
@@ -145,6 +172,26 @@ def api_admin_remove_creator():
     if not name:
         return jsonify({"error": "昵称不能为空"}), 400
     allowed_creators.discard(name)
+    _save_allowed_creators()
+    return jsonify({"ok": True, "allowed_creators": sorted(allowed_creators)})
+
+
+@app.put('/api/admin/creators')
+@admin_required
+def api_admin_update_creator():
+    body = request.json or {}
+    old_name = str(body.get('old_name', '')).strip()
+    new_name = str(body.get('new_name', '')).strip()
+
+    if not old_name or not new_name:
+        return jsonify({"error": "原昵称和新昵称都不能为空"}), 400
+
+    if old_name not in allowed_creators:
+        return jsonify({"error": "原昵称不存在"}), 404
+
+    allowed_creators.discard(old_name)
+    allowed_creators.add(new_name)
+    _save_allowed_creators()
     return jsonify({"ok": True, "allowed_creators": sorted(allowed_creators)})
 
 
@@ -302,10 +349,16 @@ if __name__ == '__main__':
     parser.add_argument('--admin-username', required=True)
     parser.add_argument('--admin-password', required=True)
     parser.add_argument('--allowed-creators', default='', help='允许创建房间昵称，逗号分隔')
+    parser.add_argument('--allowed-creators-file', default='data/allowed_creators.json', help='允许创建房间昵称文件路径')
     args = parser.parse_args()
 
     admin_username = args.admin_username
     admin_password = args.admin_password
-    allowed_creators = {name.strip() for name in args.allowed_creators.split(',') if name.strip()}
+    allowed_creators_file = Path(args.allowed_creators_file)
+
+    cli_allowed_creators = {name.strip() for name in args.allowed_creators.split(',') if name.strip()}
+    file_allowed_creators = _load_allowed_creators()
+    allowed_creators = cli_allowed_creators | file_allowed_creators
+    _save_allowed_creators()
 
     app.run(host=args.host, port=args.port, debug=False)

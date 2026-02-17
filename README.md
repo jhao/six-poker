@@ -76,8 +76,25 @@ docker build -t six-poker:latest .
 #### 运行容器
 
 ```bash
-docker run -d --name six-poker -p 5000:5000 --restart unless-stopped six-poker:latest
+docker run -d --name six-poker \
+  -p 5000:5000 \
+  -v $(pwd)/data:/data \
+  -e ADMIN_USERNAME=admin \
+  -e ADMIN_PASSWORD=123456 \
+  -e ALLOWED_CREATORS=张三,李四 \
+  -e ALLOWED_CREATORS_FILE=/data/allowed_creators.json \
+  --restart unless-stopped \
+  six-poker:latest
 ```
+
+参数说明：
+
+- `ADMIN_USERNAME`：后台管理用户名（必填）
+- `ADMIN_PASSWORD`：后台管理密码（必填）
+- `ALLOWED_CREATORS`：初始允许创建房间昵称白名单，多个昵称用英文逗号分隔（可选）
+- `ALLOWED_CREATORS_FILE`：白名单持久化文件路径（默认 `/data/allowed_creators.json`）
+
+说明：后台启动后可在 `/admin` 页面中对昵称白名单进行增删改查，修改会自动写入 `ALLOWED_CREATORS_FILE`。建议通过 `-v $(pwd)/data:/data` 挂载目录确保容器重建后数据不丢失。
 
 #### 运行检查
 
