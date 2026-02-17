@@ -73,6 +73,8 @@ const toLocalCard = (c: BackendCard): Card => {
 };
 
 const App: React.FC = () => {
+  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://47.93.33.214:81').replace(/\/$/, '');
+
   // Navigation State
   const [view, setView] = useState<ViewState>('home');
   const [room, setRoom] = useState<RoomInfo | null>(null);
@@ -92,6 +94,7 @@ const App: React.FC = () => {
   const [pendingAction, setPendingAction] = useState<'create' | 'join' | 'single' | null>(null);
   const [pendingSingleMode, setPendingSingleMode] = useState<'prompt' | 'new' | 'load'>('prompt');
   const [noticeMessage, setNoticeMessage] = useState<string>('');
+  const [viewportHeight, setViewportHeight] = useState<number>(() => window.innerHeight);
 
   // Game Logic State
   const [gameState, setGameState] = useState<GameState>({
@@ -140,6 +143,17 @@ const App: React.FC = () => {
               setView('lobby');
           }
       }
+  }, []);
+
+  useEffect(() => {
+      const updateViewportHeight = () => setViewportHeight(window.innerHeight);
+      updateViewportHeight();
+      window.addEventListener('resize', updateViewportHeight);
+      window.addEventListener('orientationchange', updateViewportHeight);
+      return () => {
+          window.removeEventListener('resize', updateViewportHeight);
+          window.removeEventListener('orientationchange', updateViewportHeight);
+      };
   }, []);
 
   // Save game state (Single Player)
@@ -194,7 +208,7 @@ const App: React.FC = () => {
   const apiRequest = useCallback(async (path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) => {
       const requestPath = /^https?:\/\//.test(path)
           ? path
-          : path.replace(/^\//, '');
+          : `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 
       const res = await fetch(requestPath, {
           method,
@@ -206,7 +220,7 @@ const App: React.FC = () => {
           throw new Error(data.error || '请求失败');
       }
       return data;
-  }, []);
+  }, [API_BASE_URL]);
 
   const syncFromBackendState = useCallback((state: BackendRoomState) => {
       const finishOrderMap = new Map<number, number>();
@@ -1196,7 +1210,10 @@ ${url}
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-900 text-slate-100 font-sans overflow-hidden flex flex-col relative select-none">
+    <div
+      className="w-full bg-slate-900 text-slate-100 font-sans overflow-hidden flex flex-col relative select-none"
+      style={{ height: `${viewportHeight}px` }}
+    >
       
       {/* Background Pattern */}
       <div className="absolute inset-0 opacity-10 pointer-events-none" style={{backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '30px 30px'}}></div>
@@ -1575,7 +1592,7 @@ ${url}
 
       {/* --- CONTROLS --- */}
       {view === 'game' && gameState.players.length > 0 && !isSpectator && (
-        <div className="absolute bottom-0 left-0 h-36 md:h-48 w-full flex flex-col items-center justify-end pb-2 md:pb-4 z-40 bg-gradient-to-t from-black/90 to-transparent pointer-events-none">
+        <div className="absolute bottom-0 left-0 h-36 md:h-48 w-full flex flex-col items-center justify-end pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:pb-4 z-40 bg-gradient-to-t from-black/90 to-transparent pointer-events-none">
            
            {/* Auto Play Overlay/Button */}
            {isAuto && (
