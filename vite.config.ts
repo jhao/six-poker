@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
         proxy: {
           '/six-poker/api': {
-            target: 'http://47.93.33.214:5008',
+            target: 'http://47.93.33.214:81',
             changeOrigin: true,
           },
         },
