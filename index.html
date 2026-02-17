@@ -46,6 +46,13 @@
       .animate-fly-to-pool-from-top { animation: fly-to-pool-from-top 0.55s ease-out forwards; }
       .animate-fly-to-pool-from-left { animation: fly-to-pool-from-left 0.55s ease-out forwards; }
       .animate-fly-to-pool-from-bottom-left { animation: fly-to-pool-from-bottom-left 0.55s ease-out forwards; }
+
+      @keyframes emote-fadeout {
+        0% { opacity: 1; }
+        70% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      .animate-emote-fadeout { animation: emote-fadeout 5s linear forwards; }
       /* Custom scrollbar for logs */
       ::-webkit-scrollbar {
         width: 4px;

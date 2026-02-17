@@ -9,6 +9,7 @@ interface GameBoardProps {
   handHistory: PlayedHand[];
   activeEmotes: EmoteMessage[];
   onEmoteSend: (targetId: number, content: string) => void;
+  onEmoteDismiss: (timestamp: number) => void;
   myPlayerId: number;
   turnTimeLeft: number;
 }
@@ -21,6 +22,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   handHistory,
   activeEmotes,
   onEmoteSend,
+  onEmoteDismiss,
   myPlayerId,
   turnTimeLeft
 }) => {
@@ -118,7 +120,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       
       {/* --- CENTER STAGE AREA --- */}
       {visibleEmoteQueue.length > 0 && (
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
+        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-auto">
           {visibleEmoteQueue.map((emote, index) => {
             const isNewest = index === visibleEmoteQueue.length - 1;
             const messageAge = visibleEmoteQueue.length - 1 - index;
@@ -128,7 +130,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             return (
               <div
                 key={emote.timestamp}
-                className={`bg-white text-black px-4 py-2 rounded-2xl shadow-lg text-sm font-bold min-w-[240px] max-w-[min(92vw,700px)] break-words text-center transition-all duration-300 ${opacityClass} ${scaleClass}`}
+                onClick={() => onEmoteDismiss(emote.timestamp)}
+                className={`bg-white text-black px-4 py-2 rounded-2xl shadow-lg text-sm font-bold min-w-[240px] max-w-[min(92vw,700px)] break-words text-center transition-all duration-300 cursor-pointer select-none animate-emote-fadeout ${opacityClass} ${scaleClass}`}
+                title="点击立即关闭"
               >
                 {renderEmoteContent(emote.content)}
               </div>
