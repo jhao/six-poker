@@ -23,6 +23,11 @@ type BackendRoomState = {
   emotes?: { sender_id: number; target_id: number; content: string; timestamp: number }[];
 };
 
+const stableHandTimestamp = (hand: BackendHand, index: number): number => {
+  const signature = `${hand.player_id}-${hand.main_rank}-${index}-${hand.cards.map(card => card.id).join('-')}`;
+  return signature.split('').reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 7);
+};
+
 const backendRankToLocal = (rank?: string): Rank => {
   const map: Record<string, Rank> = {
     '4': Rank.Four,
@@ -229,7 +234,7 @@ const App: React.FC = () => {
           playerId: hand.player_id,
           playerName: players[hand.player_id]?.name || '未知玩家',
           playerTeam: players[hand.player_id]?.team || 'A',
-          playedAt: Date.now() + index
+          playedAt: stableHandTimestamp(hand, index)
       }));
 
       setRoom({
@@ -243,7 +248,7 @@ const App: React.FC = () => {
       setGameState(prev => {
           const mergedPlayers = players.map(player => {
             const prevPlayer = prev.players[player.id];
-            const keepAuto = player.id === myPlayerId && player.id === state.turn_index;
+            const keepAuto = player.id === myPlayerId && prev.gameStatus === 'playing' && state.game_status === 'playing';
             return { ...player, isAutoPlayed: keepAuto ? Boolean(prevPlayer?.isAutoPlayed) : false };
           });
 
@@ -984,11 +989,9 @@ ${url}
       }
     };
 
-    const me = gameState.players[myPlayerId];
-    const delayMs = me?.isAutoPlayed ? HOSTED_TURN_DURATION * 1000 : 0;
     onlineAutoActionRef.current = setTimeout(() => {
       doAutoAction();
-    }, delayMs);
+    }, 0);
 
     return () => {
       if (onlineAutoActionRef.current) {
