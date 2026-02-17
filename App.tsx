@@ -76,10 +76,7 @@ const App: React.FC = () => {
   const API_BASE_URL = (() => {
     const rawBase = (import.meta.env.VITE_API_BASE_URL || '').trim();
     if (!rawBase) {
-      return `${window.location.origin}/six-poker`;
-    }
-    if (window.location.protocol === 'https:' && rawBase.startsWith('http://')) {
-      return rawBase.replace(/^http:\/\//, 'https://').replace(/\/$/, '');
+      return 'http://47.93.33.214:81';
     }
     return rawBase.replace(/\/$/, '');
   })();
