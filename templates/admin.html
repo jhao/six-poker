@@ -69,16 +69,31 @@
 
     async function loadCreators() {
       const data = await api('/api/admin/creators');
-      $('creators').innerHTML = data.allowed_creators.map(name => `
-        <span class="px-2 py-1 rounded bg-slate-700 inline-flex items-center gap-2">
-          ${name}
-          <button class="text-red-300" onclick="removeCreator('${name}')">移除</button>
-        </span>
-      `).join('') || '<span class="text-gray-400">暂无授权昵称</span>';
+      $('creators').innerHTML = data.allowed_creators.map(name => {
+        const encoded = encodeURIComponent(name);
+        return `
+          <span class="px-2 py-1 rounded bg-slate-700 inline-flex items-center gap-2">
+            ${name}
+            <button class="text-blue-300" onclick="renameCreator('${encoded}')">改名</button>
+            <button class="text-red-300" onclick="removeCreator('${encoded}')">移除</button>
+          </span>
+        `;
+      }).join('') || '<span class="text-gray-400">暂无授权昵称</span>';
     }
 
-    async function removeCreator(name) {
+    async function removeCreator(encodedName) {
+      const name = decodeURIComponent(encodedName);
       await api('/api/admin/creators', 'DELETE', { name });
+      await loadCreators();
+    }
+
+    async function renameCreator(encodedName) {
+      const oldName = decodeURIComponent(encodedName);
+      const newName = prompt('请输入新的昵称：', oldName);
+      if (!newName) return;
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === oldName) return;
+      await api('/api/admin/creators', 'PUT', { old_name: oldName, new_name: trimmed });
       await loadCreators();
     }
 
@@ -154,6 +169,7 @@
 
     checkSession();
     window.removeCreator = removeCreator;
+    window.renameCreator = renameCreator;
     window.closeRoom = closeRoom;
     window.viewRoom = viewRoom;
   </script>
