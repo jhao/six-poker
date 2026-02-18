@@ -294,11 +294,14 @@ const App: React.FC = () => {
           const teamBFinishedCount = mergedPlayers.filter(p => p.team === 'B' && p.isFinished).length;
           const isRoundOver = state.game_status === 'round_over';
           const wasPlaying = prev.gameStatus === 'playing';
-          const isDraw = state.winners.length >= 6
-            && mergedPlayers[state.winners[0]]
-            && mergedPlayers[state.winners[state.winners.length - 1]]
-            && mergedPlayers[state.winners[0]].team !== mergedPlayers[state.winners[state.winners.length - 1]].team;
-          const winnerTeam = isDraw ? 'Draw' : (teamAFinishedCount >= 3 ? 'A' : 'B');
+          const headTeam = state.winners.length > 0 ? mergedPlayers[state.winners[0]]?.team : null;
+          let winnerTeam: 'A' | 'B' | 'Draw' = teamAFinishedCount >= 3 ? 'A' : 'B';
+          if (teamAFinishedCount >= 3 && teamBFinishedCount >= 3) {
+            winnerTeam = 'Draw';
+          } else if (headTeam && winnerTeam !== headTeam) {
+            // 头游队不判负：即便未能包圆，也至少是平局。
+            winnerTeam = 'Draw';
+          }
 
           const nextState: GameState = {
             ...prev,
@@ -1163,9 +1166,14 @@ ${url}
     if (gameState.gameStatus === 'playing' && (teamAFinishedCount >= 3 || teamBFinishedCount >= 3)) {
         const orderedFinishedPlayers = [...finishedPlayers]
           .sort((a, b) => (a.finishOrder || 99) - (b.finishOrder || 99));
-        const isDraw = orderedFinishedPlayers.length >= 6
-          && orderedFinishedPlayers[0].team !== orderedFinishedPlayers[orderedFinishedPlayers.length - 1].team;
-        const winningTeam: 'A' | 'B' | 'Draw' = isDraw ? 'Draw' : (teamAFinishedCount >= 3 ? 'A' : 'B');
+        const headTeam = orderedFinishedPlayers[0]?.team;
+        let winningTeam: 'A' | 'B' | 'Draw' = teamAFinishedCount >= 3 ? 'A' : 'B';
+        if (teamAFinishedCount >= 3 && teamBFinishedCount >= 3) {
+          winningTeam = 'Draw';
+        } else if (headTeam && winningTeam !== headTeam) {
+          // 头游队不判负：只要本队拿到头游，最差为平局。
+          winningTeam = 'Draw';
+        }
         const winningTeamPlayers = finishedPlayers
           .filter(p => p.team === (winningTeam === 'Draw' ? orderedFinishedPlayers[0].team : winningTeam))
           .sort((a,b) => (a.finishOrder || 99) - (b.finishOrder || 99));
