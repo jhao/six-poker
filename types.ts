@@ -103,6 +103,7 @@ export interface GameState {
   tableHistory: PlayedHand[]; // Pool history (recent 6 plays)
   deck: Card[];
   passCount: number;
+  playerTurnHistory: Record<number, { plays: number; passes: number }>;
   winners: string[];
   logs: string[];
   activeEmotes: EmoteMessage[];

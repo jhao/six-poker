@@ -1,6 +1,7 @@
 import random
 import time
 from dataclasses import dataclass, field, asdict
+from itertools import combinations
 from typing import Dict, List, Optional
 
 RANKS = ["4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A", "2", "3", "SJ", "BJ"]
@@ -56,6 +57,7 @@ class Room:
     spectator_names: List[str] = field(default_factory=list)
     logs: List[str] = field(default_factory=list)
     emotes: List[dict] = field(default_factory=list)
+    player_turn_history: Dict[int, Dict[str, int]] = field(default_factory=dict)
     updated_at: float = field(default_factory=time.time)
 
 
@@ -118,13 +120,158 @@ def _auto_move(hand: List[Card], last: Optional[PlayedHand]) -> Optional[List[Ca
     return None
 
 
+def _generate_legal_moves(hand: List[Card], last: Optional[PlayedHand]) -> List[List[Card]]:
+    if not hand:
+        return []
+    if last:
+        sizes = [len(last.cards)]
+    else:
+        sizes = [1, 2, 3, 4]
+
+    legal: List[List[Card]] = []
+    seen = set()
+    for size in sizes:
+        if size > len(hand):
+            continue
+        for combo in combinations(hand, size):
+            cards = list(combo)
+            if not _can_beat(cards, last):
+                continue
+            key = tuple(sorted(c.id for c in cards))
+            if key in seen:
+                continue
+            seen.add(key)
+            legal.append(cards)
+
+    return legal
+
+
+def _remaining_hand_cost(move: List[Card], hand: List[Card]) -> float:
+    remaining = [c for c in hand if c.id not in {m.id for m in move}]
+    if not remaining:
+        return -4.0
+
+    value_cost = sum((c.value + 1) / 4 for c in remaining)
+    wild_penalty = sum(2 for c in remaining if c.is_wild)
+    scatter_penalty = len({c.value for c in remaining}) * 0.8
+    return value_cost + wild_penalty + scatter_penalty
+
+
+def _is_high_impact_card(move: List[Card]) -> bool:
+    hand_type, _ = _analyze(move)
+    if hand_type == "quad":
+        return True
+    return any(c.rank in {"BJ", "SJ", "3", "2"} for c in move)
+
+
+def _card_strength(move: List[Card]) -> float:
+    _, main = _analyze(move)
+    return main + len(move) * 0.4
+
+
+def _teammate_cards_left(room: Room, seat_id: int) -> int:
+    team = _team_for_seat(seat_id)
+    mates = [p for p in room.players if p.id != seat_id and p.team == team and not p.finished]
+    return min((len(p.hand) for p in mates), default=0)
+
+
+def _opponent_cards_left(room: Room, seat_id: int) -> List[int]:
+    team = _team_for_seat(seat_id)
+    return [len(p.hand) for p in room.players if p.team != team and not p.finished]
+
+
+def _evaluate_lead(move: List[Card], hand: List[Card], turn_history: Dict[int, Dict[str, int]]) -> float:
+    lead_strength_weight = 1.6
+    hand_cost_weight = 0.45
+    high_impact_bonus = 2.4
+    record_bonus = 0.0
+
+    t, _ = _analyze(move)
+    if t in {"triple", "quad"}:
+        record_bonus += 0.8
+    if any(v.get("passes", 0) >= 2 for v in turn_history.values()):
+        record_bonus += 0.5
+
+    score = 0.0
+    score += _card_strength(move) * lead_strength_weight
+    score -= _remaining_hand_cost(move, hand) * hand_cost_weight
+    if _is_high_impact_card(move):
+        score += high_impact_bonus
+    score += record_bonus
+    return score
+
+
+def _evaluate_response(
+    move: List[Card],
+    hand: List[Card],
+    last: Optional[PlayedHand],
+    opponent_cards_left: List[int],
+    turn_history: Dict[int, Dict[str, int]],
+) -> float:
+    response_success_weight = 5.0
+    hand_cost_weight = 0.45
+    pressure_threshold = 2
+    pressure_bonus = 2.2
+
+    score = 0.0
+    if last and _can_beat(move, last):
+        score += response_success_weight
+    score -= _remaining_hand_cost(move, hand) * hand_cost_weight
+
+    if opponent_cards_left and min(opponent_cards_left) <= pressure_threshold:
+        score += pressure_bonus
+        if len(move) > 1:
+            score += 0.6
+
+    if last and turn_history.get(last.player_id, {}).get("plays", 0) >= 3:
+        score += 0.6
+    return score
+
+
+def _select_best_move(room: Room, player: Player) -> Optional[List[Card]]:
+    support_threshold = 2
+    team_support_bonus = 1.8
+    legal_moves = _generate_legal_moves(player.hand, room.last_hand)
+
+    if not legal_moves:
+        return None
+
+    teammate_cards_left = _teammate_cards_left(room, player.id)
+    opponent_cards_left = _opponent_cards_left(room, player.id)
+
+    best_move = None
+    best_score = float("-inf")
+    for move in legal_moves:
+        if room.last_hand is None:
+            score = _evaluate_lead(move, player.hand, room.player_turn_history)
+        else:
+            score = _evaluate_response(
+                move,
+                player.hand,
+                room.last_hand,
+                opponent_cards_left,
+                room.player_turn_history,
+            )
+
+        if teammate_cards_left and teammate_cards_left <= support_threshold:
+            score += team_support_bonus
+            if len(move) > 1:
+                score += 0.4
+
+        if score > best_score:
+            best_score = score
+            best_move = move
+
+    return best_move
+
+
 def _run_bot_turns(room: Room):
     while room.game_status == "playing":
         nxt = room.players[room.turn_index]
         if not nxt.is_bot or nxt.finished:
             break
         time.sleep(1)
-        mv = _auto_move(nxt.hand, room.last_hand)
+        mv = _select_best_move(room, nxt)
         if mv:
             apply_action(room, nxt.id, "play", [c.id for c in mv], run_bots=False)
         else:
@@ -136,7 +283,8 @@ def create_room(name: str) -> Room:
     pwd = str(random.randint(1000, 9999))
     players = [Player(i, f"空位 {i+1}", _team_for_seat(i), is_bot=True, ready=False) for i in range(6)]
     players[0] = Player(0, name, _team_for_seat(0), is_bot=False, ready=False)
-    return Room(rid, pwd, 0, players, logs=[f"房主 {name} 创建了房间"])
+    turn_history = {i: {"plays": 0, "passes": 0} for i in range(6)}
+    return Room(rid, pwd, 0, players, logs=[f"房主 {name} 创建了房间"], player_turn_history=turn_history)
 
 
 def start_game(room: Room):
@@ -154,6 +302,7 @@ def start_game(room: Room):
     room.winners = []
     room.hand_history = []
     room.emotes = []
+    room.player_turn_history = {i: {"plays": 0, "passes": 0} for i in range(6)}
     room.logs.append(f"游戏开始，{room.players[starter].name} 持有红桃4先手")
     room.updated_at = time.time()
     _run_bot_turns(room)
@@ -238,7 +387,7 @@ def leave_room(room: Room, player_id: int):
                 break
 
     if room.game_status == "playing" and room.turn_index == player_id and not leaver.finished:
-        mv = _auto_move(leaver.hand, room.last_hand)
+        mv = _select_best_move(room, leaver)
         if mv:
             apply_action(room, leaver.id, "play", [c.id for c in mv])
         else:
@@ -288,6 +437,7 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
         if room.last_hand is None:
             return False, "新一轮必须出牌"
         room.pass_count += 1
+        room.player_turn_history.setdefault(cur.id, {"plays": 0, "passes": 0})["passes"] += 1
         room.logs.append(f"{cur.name} 过牌")
     else:
         selected = [c for c in cur.hand if c.id in set(card_ids or [])]
@@ -300,6 +450,7 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
         room.last_hand = PlayedHand(player_id, selected, t, v)
         room.hand_history.append(room.last_hand)
         room.hand_history = room.hand_history[-30:]
+        room.player_turn_history.setdefault(cur.id, {"plays": 0, "passes": 0})["plays"] += 1
         room.pass_count = 0
         room.logs.append(f"{cur.name} 出了 {len(selected)} 张牌")
         if not cur.hand and cur.id not in room.winners:
@@ -333,6 +484,8 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
         if last_winning_player_id is not None and not room.players[last_winning_player_id].finished:
             room.turn_index = last_winning_player_id
         room.logs.append("一轮过牌，重置牌权")
+        for pid in room.player_turn_history:
+            room.player_turn_history[pid]["passes"] = 0
 
     room.updated_at = time.time()
     if run_bots:

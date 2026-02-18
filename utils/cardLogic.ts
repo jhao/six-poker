@@ -1,5 +1,11 @@
-import { Card, Suit, Rank, HandType, PlayedHand } from '../types';
+import { Card, Suit, Rank, HandType, PlayedHand, Player } from '../types';
 import { RANK_VALUES } from '../constants';
+
+export interface AutoMoveContext {
+  playerId: number;
+  players: Player[];
+  playerTurnHistory?: Record<number, { plays: number; passes: number }>;
+}
 
 // Generate a fresh deck
 export const createDeck = (): Card[] => {
@@ -12,7 +18,6 @@ export const createDeck = (): Card[] => {
   let deck: Card[] = [];
   let idCounter = 0;
 
-  // Standard cards
   for (const suit of suits) {
     for (const rank of ranks) {
       const isRed = suit === Suit.Hearts || suit === Suit.Diamonds;
@@ -28,7 +33,6 @@ export const createDeck = (): Card[] => {
     }
   }
 
-  // Jokers
   deck.push({
     id: `card-${idCounter++}`,
     suit: Suit.None,
@@ -58,48 +62,30 @@ export const shuffleDeck = (deck: Card[]): Card[] => {
   return newDeck;
 };
 
-// Sort hand: Wilds (Big Joker -> 2) then regular (Ace -> 4)
 export const sortHand = (hand: Card[]): Card[] => {
   return [...hand].sort((a, b) => b.value - a.value);
 };
 
-// Identify the hand type and value
 export const analyzeHand = (cards: Card[]): { type: HandType; mainRankValue: number } => {
   if (cards.length === 0) return { type: HandType.Invalid, mainRankValue: -1 };
 
-  // Separate wilds and non-wilds
   const wilds = cards.filter(c => c.isWild);
   const nonWilds = cards.filter(c => !c.isWild);
 
-  // 1. Single Card
   if (cards.length === 1) {
     return { type: HandType.Single, mainRankValue: cards[0].value };
   }
 
-  // 2. Multiple Cards
-  // Logic: All non-wilds must be the same rank.
   if (nonWilds.length > 0) {
     const firstVal = nonWilds[0].value;
     const allSame = nonWilds.every(c => c.value === firstVal);
     if (!allSame) return { type: HandType.Invalid, mainRankValue: -1 };
 
-    // Valid combination (Wilds act as the non-wild rank)
     const count = cards.length;
     if (count === 2) return { type: HandType.Pair, mainRankValue: firstVal };
     if (count === 3) return { type: HandType.Triple, mainRankValue: firstVal };
     if (count === 4) return { type: HandType.Quad, mainRankValue: firstVal };
   } else {
-    // ONLY WILDS
-    // Rule: "Two or more wilds take the smallest".
-    // Example: Big Joker + 3 -> Pair of 3s.
-    // Example: 2 + 3 -> Pair of 2s (Actually 2 < 3? No, 2=11, 3=12. So 2 is smaller wild logic-wise?
-    // Wait, Rule says: 大王＞小王＞3＞2. So 2 is smallest wild.
-    // However, if we play [Big Joker, 3], the smallest is 3?
-    // Let's look at logic values: 2=11, 3=12, SJ=13, BJ=14.
-    // Rule says: "Two or more composed of wilds take smallest".
-    // Meaning the rank value is the minimum of the wilds.
-    
-    // Find min value card
     const minWildValue = Math.min(...wilds.map(c => c.value));
     const count = cards.length;
     if (count === 2) return { type: HandType.Pair, mainRankValue: minWildValue };
@@ -110,89 +96,146 @@ export const analyzeHand = (cards: Card[]): { type: HandType; mainRankValue: num
   return { type: HandType.Invalid, mainRankValue: -1 };
 };
 
-// Check if current cards beat the last hand
 export const canBeat = (newCards: Card[], lastHand: PlayedHand): boolean => {
   const analysis = analyzeHand(newCards);
-  
-  // Must match type
   if (analysis.type !== lastHand.type) return false;
-  
-  // Must be strictly larger
   return analysis.mainRankValue > lastHand.mainRankValue;
 };
 
-// Simple AI to find a valid move
-export const findAutoMove = (hand: Card[], lastHand: PlayedHand | null): Card[] | null => {
-  // If free turn, play smallest single
-  if (!lastHand) {
-    // Try to save wilds, play smallest non-wild
-    const nonWilds = hand.filter(c => !c.isWild);
-    if (nonWilds.length > 0) return [nonWilds[nonWilds.length - 1]];
-    return [hand[hand.length - 1]]; // Play smallest wild
+const generateLegalMoves = (hand: Card[], lastHand: PlayedHand | null): Card[][] => {
+  const legalMoves: Card[][] = [];
+  const seen = new Set<string>();
+  const sizes = lastHand ? [lastHand.cards.length] : [1, 2, 3, 4];
+
+  const dfs = (start: number, size: number, path: Card[]) => {
+    if (path.length === size) {
+      const key = path.map(c => c.id).sort().join('|');
+      if (seen.has(key)) return;
+      const valid = lastHand ? canBeat(path, lastHand) : analyzeHand(path).type !== HandType.Invalid;
+      if (!valid) return;
+      seen.add(key);
+      legalMoves.push([...path]);
+      return;
+    }
+    for (let i = start; i < hand.length; i++) {
+      path.push(hand[i]);
+      dfs(i + 1, size, path);
+      path.pop();
+    }
+  };
+
+  for (const size of sizes) {
+    if (size <= hand.length) dfs(0, size, []);
   }
 
-  const reqCount = lastHand.cards.length;
-  const reqType = lastHand.type;
-  const reqVal = lastHand.mainRankValue;
+  return legalMoves;
+};
 
-  // Simple Greedy Strategy:
-  // 1. Look for exact natural matches (e.g., Pair of 5s beating Pair of 4s)
-  // 2. Look for wild-assisted matches
-  
-  // Group cards by rank
-  const groups: Record<number, Card[]> = {};
-  hand.forEach(c => {
-    if (!groups[c.value]) groups[c.value] = [];
-    groups[c.value].push(c);
-  });
+const cardStrength = (move: Card[]): number => {
+  const { mainRankValue } = analyzeHand(move);
+  return mainRankValue + move.length * 0.35;
+};
 
-  // Try to find natural beats first (saving wilds)
-  const sortedValues = Object.keys(groups).map(Number).sort((a, b) => a - b);
-  
-  for (const val of sortedValues) {
-    if (val > reqVal && !groups[val][0].isWild) { // Must be bigger and ideally not pure wild
-       if (groups[val].length >= reqCount) {
-         // We have enough naturals
-         return groups[val].slice(0, reqCount);
-       }
+const remainingHandCost = (move: Card[], hand: Card[]): number => {
+  const moveIds = new Set(move.map(c => c.id));
+  const remaining = hand.filter(c => !moveIds.has(c.id));
+  if (remaining.length === 0) return -5;
+
+  const valueCost = remaining.reduce((sum, c) => sum + (c.value + 1) / 4, 0);
+  const structurePenalty = new Set(remaining.map(c => c.value)).size * 0.7;
+  const wildPenalty = remaining.filter(c => c.isWild).length * 1.8;
+  return valueCost + structurePenalty + wildPenalty;
+};
+
+const isHighImpactCard = (move: Card[]): boolean => {
+  const { type } = analyzeHand(move);
+  return type === HandType.Quad || move.some(c => [Rank.Two, Rank.Three, Rank.SmallJoker, Rank.BigJoker].includes(c.rank));
+};
+
+const teammateCardsLeft = (ctx: AutoMoveContext): number => {
+  const me = ctx.players[ctx.playerId];
+  if (!me) return 0;
+  const mates = ctx.players.filter(p => !p.isFinished && p.id !== me.id && p.team === me.team);
+  if (mates.length === 0) return 0;
+  return Math.min(...mates.map(p => p.hand.length));
+};
+
+const opponentCardsLeft = (ctx: AutoMoveContext): number[] => {
+  const me = ctx.players[ctx.playerId];
+  if (!me) return [];
+  return ctx.players.filter(p => !p.isFinished && p.team !== me.team).map(p => p.hand.length);
+};
+
+const evaluateLead = (move: Card[], hand: Card[], ctx?: AutoMoveContext): number => {
+  const LEAD_STRENGTH_WEIGHT = 1.6;
+  const HAND_COST_WEIGHT = 0.45;
+  const HIGH_IMPACT_BONUS = 2.2;
+
+  let score = 0;
+  score += cardStrength(move) * LEAD_STRENGTH_WEIGHT;
+  score -= remainingHandCost(move, hand) * HAND_COST_WEIGHT;
+  if (isHighImpactCard(move)) score += HIGH_IMPACT_BONUS;
+
+  if (ctx?.playerTurnHistory && Object.values(ctx.playerTurnHistory).some(v => v.passes >= 2)) {
+    score += 0.5;
+  }
+  return score;
+};
+
+const evaluateResponse = (move: Card[], hand: Card[], lastHand: PlayedHand, ctx?: AutoMoveContext): number => {
+  const RESPONSE_SUCCESS_WEIGHT = 5;
+  const HAND_COST_WEIGHT = 0.45;
+  const PRESSURE_THRESHOLD = 2;
+  const PRESSURE_BONUS = 2.2;
+
+  let score = 0;
+  if (canBeat(move, lastHand)) score += RESPONSE_SUCCESS_WEIGHT;
+  score -= remainingHandCost(move, hand) * HAND_COST_WEIGHT;
+
+  if (ctx) {
+    const oppLeft = opponentCardsLeft(ctx);
+    if (oppLeft.length > 0 && Math.min(...oppLeft) <= PRESSURE_THRESHOLD) {
+      score += PRESSURE_BONUS;
+      if (move.length > 1) score += 0.6;
+    }
+
+    const lastPid = lastHand.playerId;
+    if ((ctx.playerTurnHistory?.[lastPid]?.plays || 0) >= 3) score += 0.4;
+  }
+
+  return score;
+};
+
+export const findAutoMove = (
+  hand: Card[],
+  lastHand: PlayedHand | null,
+  ctx?: AutoMoveContext
+): Card[] | null => {
+  const legalMoves = generateLegalMoves(hand, lastHand);
+  if (legalMoves.length === 0) return null;
+
+  const SUPPORT_THRESHOLD = 2;
+  const TEAM_SUPPORT_BONUS = 1.8;
+  const mateLeft = ctx ? teammateCardsLeft(ctx) : 0;
+
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let bestMove: Card[] | null = null;
+
+  for (const move of legalMoves) {
+    let moveScore = lastHand
+      ? evaluateResponse(move, hand, lastHand, ctx)
+      : evaluateLead(move, hand, ctx);
+
+    if (mateLeft > 0 && mateLeft <= SUPPORT_THRESHOLD) {
+      moveScore += TEAM_SUPPORT_BONUS;
+      if (move.length > 1) moveScore += 0.4;
+    }
+
+    if (moveScore > bestScore) {
+      bestScore = moveScore;
+      bestMove = move;
     }
   }
 
-  // Try using wilds
-  // Calculate available wilds
-  const myWilds = hand.filter(c => c.isWild);
-  
-  // Try to combine a natural group with wilds
-  for (const val of sortedValues) {
-      if (val > reqVal) { // Candidate rank
-          const naturalCount = groups[val].length;
-          const needed = reqCount - naturalCount;
-          if (needed > 0 && myWilds.length >= needed) {
-             // Avoid using the wild if it's the same card (already in group if rank is 2/3)
-             // If val is a Wild rank (e.g. 2 or 3), it's already in 'groups'.
-             // This logic is complex. Simplified:
-             
-             // Check if we can form a hand of length `reqCount` with value `val`
-             // Construct candidate
-             const candidates = [...groups[val]];
-             // Add distinct wilds until full
-             for (const w of myWilds) {
-                 if (candidates.length >= reqCount) break;
-                 if (!candidates.find(c => c.id === w.id)) {
-                     candidates.push(w);
-                 }
-             }
-             
-             if (candidates.length === reqCount) {
-                 return candidates;
-             }
-          }
-      }
-  }
-
-  // Pure wild beat (if we have pure wilds bigger than target)
-  // E.g. last hand is Single 5. We have Single 2.
-  // This is covered by the first loop if they are grouped correctly.
-  
-  return null;
+  return bestMove;
 };
