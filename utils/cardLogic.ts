@@ -218,6 +218,28 @@ const evaluateLead = (move: Card[], hand: Card[], ctx?: AutoMoveContext): number
   return score;
 };
 
+
+const teammateCanCover = (move: Card[], ctx: AutoMoveContext): boolean => {
+  const me = ctx.players[ctx.playerId];
+  if (!me) return false;
+  const { type, mainRankValue } = analyzeHand(move);
+  const req = move.length;
+  const mates = ctx.players.filter(p => !p.isFinished && p.id !== me.id && p.team === me.team);
+  for (const mate of mates) {
+    const groups = new Map<number, Card[]>();
+    for (const card of mate.hand) {
+      const cards = groups.get(card.value) || [];
+      cards.push(card);
+      groups.set(card.value, cards);
+    }
+    for (const [value, cards] of groups.entries()) {
+      if (value <= mainRankValue || cards.length < req) continue;
+      const candidate = cards.slice(0, req);
+      if (analyzeHand(candidate).type === type) return true;
+    }
+  }
+  return false;
+};
 const evaluateResponse = (move: Card[], hand: Card[], lastHand: PlayedHand, ctx?: AutoMoveContext): number => {
   const RESPONSE_SUCCESS_WEIGHT = 5;
   const HAND_COST_WEIGHT = 0.45;
@@ -227,8 +249,14 @@ const evaluateResponse = (move: Card[], hand: Card[], lastHand: PlayedHand, ctx?
   let score = 0;
   if (canBeat(move, lastHand)) score += RESPONSE_SUCCESS_WEIGHT;
   score -= remainingHandCost(move, hand) * HAND_COST_WEIGHT;
+
+  // 跟牌优先以小牌试探：能自管或队友能接力时，不急于交大牌。
+  score -= cardStrength(move) * 0.2;
+  const followups = controlFollowups(move, hand);
+  score += followups * 1.2;
+  if (followups === 0) score -= 0.8;
+
   if (move.some(isTrumpCard)) score -= trumpRatio(hand) < 0.45 ? 2 : 0.6;
-  score += controlFollowups(move, hand) * 0.9;
 
   if (ctx) {
     const oppLeft = opponentCardsLeft(ctx);
@@ -274,6 +302,10 @@ export const findAutoMove = (
     let moveScore = lastHand
       ? evaluateResponse(move, hand, lastHand, ctx)
       : evaluateLead(move, hand, ctx);
+
+    if (ctx && lastHand && teammateCanCover(move, ctx)) {
+      moveScore += 1.8;
+    }
 
     if (mateLeft > 0 && mateLeft <= SUPPORT_THRESHOLD) {
       moveScore += TEAM_SUPPORT_BONUS;

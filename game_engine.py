@@ -199,6 +199,24 @@ def _control_followups(move: List[Card], hand: List[Card]) -> int:
     return count
 
 
+def _teammate_can_cover(room: Room, player: Player, move: List[Card]) -> bool:
+    move_type, move_rank = _analyze(move)
+    req = len(move)
+    teammates = [p for p in room.players if not p.finished and p.id != player.id and p.team == player.team]
+    for mate in teammates:
+        groups: Dict[int, List[Card]] = {}
+        for c in mate.hand:
+            groups.setdefault(c.value, []).append(c)
+        for v, cards in groups.items():
+            if v <= move_rank or len(cards) < req:
+                continue
+            cand = cards[:req]
+            t, _ = _analyze(cand)
+            if t == move_type:
+                return True
+    return False
+
+
 def _card_strength(move: List[Card]) -> float:
     _, main = _analyze(move)
     return main + len(move) * 0.4
@@ -261,10 +279,16 @@ def _evaluate_response(
         score += response_success_weight
     score -= _remaining_hand_cost(move, hand) * hand_cost_weight
 
+    # 跟牌时优先“小管大”，若我方后续能再压或队友能接力，则更倾向先出小牌。
+    score -= _card_strength(move) * 0.2
+
+    followups = _control_followups(move, hand)
+    score += followups * 1.2
+    if followups == 0:
+        score -= 0.8
+
     if any(_is_trump_card(c) for c in move):
         score -= 2.0 if _trump_ratio(hand) < 0.45 else 0.6
-
-    score += _control_followups(move, hand) * 0.9
 
     if opponent_cards_left and min(opponent_cards_left) <= pressure_threshold:
         score += pressure_bonus
@@ -309,6 +333,8 @@ def _select_best_move(room: Room, player: Player) -> Optional[List[Card]]:
                 opponent_cards_left,
                 room.player_turn_history,
             )
+            if _teammate_can_cover(room, player, move):
+                score += 1.8
 
         if teammate_cards_left and teammate_cards_left <= support_threshold:
             score += team_support_bonus
@@ -523,8 +549,18 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
     team_b_finished = sum(1 for p in room.players if p.finished and p.id not in TEAM_A)
     if team_a_finished >= 3 or team_b_finished >= 3:
         room.game_status = "round_over"
-        winner = 'A' if team_a_finished >= 3 else 'B'
-        room.logs.append(f"本局结束，{winner}队全员出完")
+        head_team = room.players[room.winners[0]].team if room.winners else None
+        if team_a_finished >= 3 and team_b_finished >= 3:
+            winner = "Draw"
+        else:
+            winner = 'A' if team_a_finished >= 3 else 'B'
+            # 头游队不判负：若对方先全员出完但我方有头游，则判平。
+            if head_team and winner != head_team:
+                winner = "Draw"
+        if winner == "Draw":
+            room.logs.append("本局结束，平局（头游队未负）")
+        else:
+            room.logs.append(f"本局结束，{winner}队全员出完")
         return True, "ok"
 
     alive = [p for p in room.players if not p.finished]
