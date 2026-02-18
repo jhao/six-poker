@@ -294,7 +294,11 @@ const App: React.FC = () => {
           const teamBFinishedCount = mergedPlayers.filter(p => p.team === 'B' && p.isFinished).length;
           const isRoundOver = state.game_status === 'round_over';
           const wasPlaying = prev.gameStatus === 'playing';
-          const winnerTeam = teamAFinishedCount >= 3 ? 'A' : 'B';
+          const isDraw = state.winners.length >= 6
+            && mergedPlayers[state.winners[0]]
+            && mergedPlayers[state.winners[state.winners.length - 1]]
+            && mergedPlayers[state.winners[0]].team !== mergedPlayers[state.winners[state.winners.length - 1]].team;
+          const winnerTeam = isDraw ? 'Draw' : (teamAFinishedCount >= 3 ? 'A' : 'B');
 
           const nextState: GameState = {
             ...prev,
@@ -322,19 +326,20 @@ const App: React.FC = () => {
           };
 
           if (isRoundOver && wasPlaying && (teamAFinishedCount >= 3 || teamBFinishedCount >= 3)) {
+            const headName = state.winners.length > 0 ? mergedPlayers[state.winners[0]]?.name : '未知';
             nextState.scores = [
               ...prev.scores,
               {
                 round: prev.currentRound,
                 winnerTeam,
-                teamAScore: winnerTeam === 'A' ? 1 : 0,
-                teamBScore: winnerTeam === 'B' ? 1 : 0,
-                details: `头游: ${state.winners.length > 0 ? mergedPlayers[state.winners[0]]?.name : '未知'}`
+                teamAScore: winnerTeam === 'Draw' ? 0.5 : (winnerTeam === 'A' ? 1 : 0),
+                teamBScore: winnerTeam === 'Draw' ? 0.5 : (winnerTeam === 'B' ? 1 : 0),
+                details: winnerTeam === 'Draw' ? `平局（头游: ${headName}）` : `头游: ${headName}`
               }
             ];
             nextState.teamBattleSummary = {
-              teamA: prev.teamBattleSummary.teamA + (winnerTeam === 'A' ? 1 : 0),
-              teamB: prev.teamBattleSummary.teamB + (winnerTeam === 'B' ? 1 : 0)
+              teamA: prev.teamBattleSummary.teamA + (winnerTeam === 'Draw' ? 0.5 : (winnerTeam === 'A' ? 1 : 0)),
+              teamB: prev.teamBattleSummary.teamB + (winnerTeam === 'Draw' ? 0.5 : (winnerTeam === 'B' ? 1 : 0))
             };
           }
 
@@ -1156,23 +1161,27 @@ ${url}
     const teamBFinishedCount = finishedPlayers.filter(p => p.team === 'B').length;
 
     if (gameState.gameStatus === 'playing' && (teamAFinishedCount >= 3 || teamBFinishedCount >= 3)) {
-        const winningTeam = teamAFinishedCount >= 3 ? 'A' : 'B';
+        const orderedFinishedPlayers = [...finishedPlayers]
+          .sort((a, b) => (a.finishOrder || 99) - (b.finishOrder || 99));
+        const isDraw = orderedFinishedPlayers.length >= 6
+          && orderedFinishedPlayers[0].team !== orderedFinishedPlayers[orderedFinishedPlayers.length - 1].team;
+        const winningTeam: 'A' | 'B' | 'Draw' = isDraw ? 'Draw' : (teamAFinishedCount >= 3 ? 'A' : 'B');
         const winningTeamPlayers = finishedPlayers
-          .filter(p => p.team === winningTeam)
+          .filter(p => p.team === (winningTeam === 'Draw' ? orderedFinishedPlayers[0].team : winningTeam))
           .sort((a,b) => (a.finishOrder || 99) - (b.finishOrder || 99));
         const headWinnerName = winningTeamPlayers[0]?.name || '未知';
 
         const newScore: ScoreRecord = {
             round: gameState.currentRound,
             winnerTeam: winningTeam,
-            teamAScore: winningTeam === 'A' ? 1 : 0,
-            teamBScore: winningTeam === 'B' ? 1 : 0,
-            details: `头游: ${headWinnerName}（该队全员出完）`
+            teamAScore: winningTeam === 'Draw' ? 0.5 : (winningTeam === 'A' ? 1 : 0),
+            teamBScore: winningTeam === 'Draw' ? 0.5 : (winningTeam === 'B' ? 1 : 0),
+            details: winningTeam === 'Draw' ? `平局（头游: ${headWinnerName}）` : `头游: ${headWinnerName}（该队全员出完）`
         };
 
         const myPlayer = gameState.players.find(p => p.id === myPlayerId);
         if (myPlayer) {
-            const isWin = winningTeam === myPlayer.team;
+            const isWin = winningTeam !== 'Draw' && winningTeam === myPlayer.team;
             saveStats(isWin, room?.roomId === 'LOCAL');
         }
 
@@ -1185,10 +1194,10 @@ ${url}
               .sort((a, b) => (a.finishOrder || 99) - (b.finishOrder || 99))
               .map(p => `${p.finishOrder}. ${p.name}(${teamLabel(p.team)})`),
             teamBattleSummary: {
-              teamA: prev.teamBattleSummary.teamA + (winningTeam === 'A' ? 1 : 0),
-              teamB: prev.teamBattleSummary.teamB + (winningTeam === 'B' ? 1 : 0)
+              teamA: prev.teamBattleSummary.teamA + (winningTeam === 'Draw' ? 0.5 : (winningTeam === 'A' ? 1 : 0)),
+              teamB: prev.teamBattleSummary.teamB + (winningTeam === 'Draw' ? 0.5 : (winningTeam === 'B' ? 1 : 0))
             },
-            logs: [`本局结束：${teamLabel(winningTeam)}胜利。`, ...prev.logs].slice(0, 50)
+            logs: [`本局结束：${winningTeam === 'Draw' ? '平局。' : `${teamLabel(winningTeam)}胜利。`}`, ...prev.logs].slice(0, 50)
         }));
         setView('score_summary');
     }

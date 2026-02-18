@@ -8,6 +8,7 @@ RANKS = ["4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A", "2", "3", "SJ",
 SUITS = ["♥", "♦", "♣", "♠"]
 RANK_VALUES = {rank: i for i, rank in enumerate(RANKS)}
 TEAM_A = {0, 2, 4}
+TRUMP_RANKS = {"BJ", "SJ", "3", "2", "A"}
 
 
 def _team_for_seat(seat_id: int) -> str:
@@ -164,6 +165,40 @@ def _is_high_impact_card(move: List[Card]) -> bool:
     return any(c.rank in {"BJ", "SJ", "3", "2"} for c in move)
 
 
+def _is_trump_card(card: Card) -> bool:
+    return card.rank in TRUMP_RANKS
+
+
+def _move_is_trump(move: List[Card]) -> bool:
+    return all(_is_trump_card(c) for c in move)
+
+
+def _trump_ratio(hand: List[Card]) -> float:
+    return (sum(1 for c in hand if _is_trump_card(c)) / len(hand)) if hand else 0.0
+
+
+def _control_followups(move: List[Card], hand: List[Card]) -> int:
+    move_ids = {c.id for c in move}
+    remaining = [c for c in hand if c.id not in move_ids]
+    if not remaining:
+        return 0
+
+    move_type, move_rank = _analyze(move)
+    req = len(move)
+    groups: Dict[int, List[Card]] = {}
+    for c in remaining:
+        groups.setdefault(c.value, []).append(c)
+
+    count = 0
+    for v, cards in groups.items():
+        if v > move_rank and len(cards) >= req:
+            cand = cards[:req]
+            t, _ = _analyze(cand)
+            if t == move_type:
+                count += 1
+    return count
+
+
 def _card_strength(move: List[Card]) -> float:
     _, main = _analyze(move)
     return main + len(move) * 0.4
@@ -197,6 +232,14 @@ def _evaluate_lead(move: List[Card], hand: List[Card], turn_history: Dict[int, D
     score -= _remaining_hand_cost(move, hand) * hand_cost_weight
     if _is_high_impact_card(move):
         score += high_impact_bonus
+    # 主牌尽量后置，除非主牌很多可抢头游。
+    trump_ratio = _trump_ratio(hand)
+    if any(_is_trump_card(c) for c in move):
+        score -= 3.0 if trump_ratio < 0.45 else 0.8
+    if trump_ratio >= 0.6 and _move_is_trump(move):
+        score += 2.0
+
+    score += _control_followups(move, hand) * 1.35
     score += record_bonus
     return score
 
@@ -217,6 +260,11 @@ def _evaluate_response(
     if last and _can_beat(move, last):
         score += response_success_weight
     score -= _remaining_hand_cost(move, hand) * hand_cost_weight
+
+    if any(_is_trump_card(c) for c in move):
+        score -= 2.0 if _trump_ratio(hand) < 0.45 else 0.6
+
+    score += _control_followups(move, hand) * 0.9
 
     if opponent_cards_left and min(opponent_cards_left) <= pressure_threshold:
         score += pressure_bonus
@@ -239,6 +287,15 @@ def _select_best_move(room: Room, player: Player) -> Optional[List[Card]]:
     teammate_cards_left = _teammate_cards_left(room, player.id)
     opponent_cards_left = _opponent_cards_left(room, player.id)
 
+    if room.last_hand is not None:
+        last_player = room.players[room.last_hand.player_id]
+        teammate_led = last_player.team == player.team and last_player.id != player.id
+        teammate_critical = len(last_player.hand) <= 2
+        if teammate_led and _move_is_trump(room.last_hand.cards):
+            # 队友出了主牌，通常不抢，优先让队友走完。
+            if teammate_critical or (opponent_cards_left and min(opponent_cards_left) > 1):
+                return None
+
     best_move = None
     best_score = float("-inf")
     for move in legal_moves:
@@ -257,6 +314,11 @@ def _select_best_move(room: Room, player: Player) -> Optional[List[Card]]:
             score += team_support_bonus
             if len(move) > 1:
                 score += 0.4
+            # 队友快走完时少用主牌压队友，尽量控节奏给队友。
+            if room.last_hand and room.last_hand.player_id != player.id:
+                last_player = room.players[room.last_hand.player_id]
+                if last_player.team == player.team and any(_is_trump_card(c) for c in move):
+                    score -= 2.0
 
         if score > best_score:
             best_score = score
