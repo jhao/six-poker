@@ -21,6 +21,7 @@ type BackendRoomState = {
   winners: number[];
   logs: string[];
   emotes?: { sender_id: number; target_id: number; content: string; timestamp: number }[];
+  player_turn_history?: Record<number, { plays: number; passes: number }>;
 };
 
 const stableHandTimestamp = (hand: BackendHand, index: number): number => {
@@ -111,6 +112,7 @@ const App: React.FC = () => {
     deck: [],
     gameStatus: 'waiting',
     passCount: 0,
+    playerTurnHistory: {},
     winners: [],
     logs: [],
     activeEmotes: [],
@@ -301,6 +303,7 @@ const App: React.FC = () => {
             handHistory: history,
             tableHistory: history.slice(-6),
             passCount: state.pass_count,
+            playerTurnHistory: state.player_turn_history || prev.playerTurnHistory || {},
             winners: state.winners.map(pid => mergedPlayers[pid]?.name || `玩家${pid + 1}`),
             logs: state.logs,
             activeEmotes: (state.emotes || [])
@@ -570,6 +573,7 @@ ${url}
       deck,
       gameStatus: 'playing',
       passCount: 0,
+      playerTurnHistory: Object.fromEntries(players.map(p => [p.id, { plays: 0, passes: 0 }])),
       winners: [],
       logs: [`游戏开始！${players[starterIndex].name} 拥有红桃4，先出牌。`],
       activeEmotes: [],
@@ -651,7 +655,11 @@ ${url}
     const isFreeTurn = handHistory.length === 0 || passCount >= threshold;
     const lastValidHand = isFreeTurn ? null : handHistory[handHistory.length - 1];
 
-    const move = findAutoMove(currentPlayer.hand, lastValidHand);
+    const move = findAutoMove(currentPlayer.hand, lastValidHand, {
+      playerId: currentPlayer.id,
+      players,
+      playerTurnHistory: gameState.playerTurnHistory
+    });
 
     if (move) {
       playCards(currentPlayer.id, move);
@@ -712,6 +720,13 @@ ${url}
       
       // Update players array
       const newPlayers = prev.players.map(p => p.id === playerId ? { ...p, hand: newHand, isFinished, finishOrder: newFinishOrder } : p);
+      const nextTurnHistory = {
+        ...prev.playerTurnHistory,
+        [playerId]: {
+          plays: (prev.playerTurnHistory[playerId]?.plays || 0) + 1,
+          passes: prev.playerTurnHistory[playerId]?.passes || 0
+        }
+      };
 
       // Determine next turn
       // After playing, it's the next active player's turn
@@ -725,6 +740,7 @@ ${url}
         tableHistory: newTableHistory,
         currentTurnIndex: nextIndex,
         passCount: 0, // Reset pass count on play
+        playerTurnHistory: nextTurnHistory,
         logs: [`${player.name} 打出了 ${handAnalysis.type}`, ...prev.logs].slice(0, 50),
         winners: newWinners,
         turnTimeLeft: getTurnDurationForPlayer(nextPlayer)
@@ -754,6 +770,13 @@ ${url}
       }
 
       const newPassCount = prev.passCount + 1;
+      const nextTurnHistory = {
+        ...prev.playerTurnHistory,
+        [playerId]: {
+          plays: prev.playerTurnHistory[playerId]?.plays || 0,
+          passes: (prev.playerTurnHistory[playerId]?.passes || 0) + 1
+        }
+      };
       let logs = [`${prev.players[playerId].name} 不出`, ...prev.logs].slice(0, 50);
       let newHistory = prev.handHistory;
       
@@ -805,9 +828,19 @@ ${url}
       }
 
       const nextPlayer = prev.players[nextTurnIndex];
+      const historyAfterPass = resetPassCount === 0
+        ? Object.fromEntries(
+            Object.keys(nextTurnHistory).map(k => [
+              Number(k),
+              { plays: nextTurnHistory[Number(k)]?.plays || 0, passes: 0 }
+            ])
+          )
+        : nextTurnHistory;
+
       return {
         ...prev,
         passCount: resetPassCount,
+        playerTurnHistory: historyAfterPass,
         handHistory: newHistory,
         logs,
         currentTurnIndex: nextTurnIndex,
@@ -1054,7 +1087,11 @@ ${url}
       }
       const isFree = gameState.handHistory.length === 0 || gameState.passCount >= threshold;
       const lastHand = isFree ? null : gameState.handHistory[gameState.handHistory.length - 1];
-      const move = findAutoMove(gameState.players[myPlayerId].hand, lastHand);
+      const move = findAutoMove(gameState.players[myPlayerId].hand, lastHand, {
+        playerId: myPlayerId,
+        players: gameState.players,
+        playerTurnHistory: gameState.playerTurnHistory
+      });
       try {
         await apiRequest(`/api/rooms/${room.roomId}/action`, 'POST', {
           player_id: myPlayerId,
