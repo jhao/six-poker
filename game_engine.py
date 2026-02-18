@@ -126,9 +126,9 @@ def _run_bot_turns(room: Room):
         time.sleep(1)
         mv = _auto_move(nxt.hand, room.last_hand)
         if mv:
-            apply_action(room, nxt.id, "play", [c.id for c in mv])
+            apply_action(room, nxt.id, "play", [c.id for c in mv], run_bots=False)
         else:
-            apply_action(room, nxt.id, "pass", [])
+            apply_action(room, nxt.id, "pass", [], run_bots=False)
 
 
 def create_room(name: str) -> Room:
@@ -278,7 +278,7 @@ def swap_seat(room: Room, player_id: int, target_seat_id: int):
     room.updated_at = time.time()
     return True, "ok"
 
-def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[List[str]] = None):
+def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[List[str]] = None, run_bots: bool = True):
     if room.game_status != "playing":
         return False, "游戏未开始"
     cur = room.players[room.turn_index]
@@ -327,10 +327,14 @@ def apply_action(room: Room, player_id: int, action: str, card_ids: Optional[Lis
             pass_threshold = len(alive)
 
     if room.pass_count >= pass_threshold:
+        last_winning_player_id = room.last_hand.player_id if room.last_hand else None
         room.last_hand = None
         room.pass_count = 0
+        if last_winning_player_id is not None and not room.players[last_winning_player_id].finished:
+            room.turn_index = last_winning_player_id
         room.logs.append("一轮过牌，重置牌权")
 
     room.updated_at = time.time()
-    _run_bot_turns(room)
+    if run_bots:
+        _run_bot_turns(room)
     return True, "ok"
