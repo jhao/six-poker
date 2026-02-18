@@ -7,6 +7,8 @@ export interface AutoMoveContext {
   playerTurnHistory?: Record<number, { plays: number; passes: number }>;
 }
 
+const TRUMP_RANKS = new Set<Rank>([Rank.BigJoker, Rank.SmallJoker, Rank.Three, Rank.Two, Rank.Ace]);
+
 // Generate a fresh deck
 export const createDeck = (): Card[] => {
   const suits = [Suit.Hearts, Suit.Diamonds, Suit.Clubs, Suit.Spades];
@@ -152,6 +154,35 @@ const isHighImpactCard = (move: Card[]): boolean => {
   return type === HandType.Quad || move.some(c => [Rank.Two, Rank.Three, Rank.SmallJoker, Rank.BigJoker].includes(c.rank));
 };
 
+const isTrumpCard = (card: Card): boolean => TRUMP_RANKS.has(card.rank);
+
+const moveIsTrump = (move: Card[]): boolean => move.length > 0 && move.every(isTrumpCard);
+
+const trumpRatio = (hand: Card[]): number => hand.length === 0 ? 0 : hand.filter(isTrumpCard).length / hand.length;
+
+const controlFollowups = (move: Card[], hand: Card[]): number => {
+  const moveIds = new Set(move.map(c => c.id));
+  const remaining = hand.filter(c => !moveIds.has(c.id));
+  if (remaining.length === 0) return 0;
+
+  const { type, mainRankValue } = analyzeHand(move);
+  const req = move.length;
+  const groups = new Map<number, Card[]>();
+  for (const card of remaining) {
+    const cards = groups.get(card.value) || [];
+    cards.push(card);
+    groups.set(card.value, cards);
+  }
+
+  let count = 0;
+  groups.forEach((cards, value) => {
+    if (value <= mainRankValue || cards.length < req) return;
+    const candidate = cards.slice(0, req);
+    if (analyzeHand(candidate).type === type) count += 1;
+  });
+  return count;
+};
+
 const teammateCardsLeft = (ctx: AutoMoveContext): number => {
   const me = ctx.players[ctx.playerId];
   if (!me) return 0;
@@ -176,6 +207,11 @@ const evaluateLead = (move: Card[], hand: Card[], ctx?: AutoMoveContext): number
   score -= remainingHandCost(move, hand) * HAND_COST_WEIGHT;
   if (isHighImpactCard(move)) score += HIGH_IMPACT_BONUS;
 
+  const ratio = trumpRatio(hand);
+  if (move.some(isTrumpCard)) score -= ratio < 0.45 ? 3 : 0.8;
+  if (ratio >= 0.6 && moveIsTrump(move)) score += 2;
+  score += controlFollowups(move, hand) * 1.35;
+
   if (ctx?.playerTurnHistory && Object.values(ctx.playerTurnHistory).some(v => v.passes >= 2)) {
     score += 0.5;
   }
@@ -191,6 +227,8 @@ const evaluateResponse = (move: Card[], hand: Card[], lastHand: PlayedHand, ctx?
   let score = 0;
   if (canBeat(move, lastHand)) score += RESPONSE_SUCCESS_WEIGHT;
   score -= remainingHandCost(move, hand) * HAND_COST_WEIGHT;
+  if (move.some(isTrumpCard)) score -= trumpRatio(hand) < 0.45 ? 2 : 0.6;
+  score += controlFollowups(move, hand) * 0.9;
 
   if (ctx) {
     const oppLeft = opponentCardsLeft(ctx);
@@ -218,6 +256,17 @@ export const findAutoMove = (
   const TEAM_SUPPORT_BONUS = 1.8;
   const mateLeft = ctx ? teammateCardsLeft(ctx) : 0;
 
+  if (ctx && lastHand) {
+    const me = ctx.players[ctx.playerId];
+    const lastPlayer = ctx.players[lastHand.playerId];
+    const oppLeft = opponentCardsLeft(ctx);
+    const teammateLed = Boolean(me && lastPlayer && me.team === lastPlayer.team && me.id !== lastPlayer.id);
+    const teammateCritical = Boolean(lastPlayer && lastPlayer.hand.length <= 2);
+    if (teammateLed && moveIsTrump(lastHand.cards) && (teammateCritical || (oppLeft.length > 0 && Math.min(...oppLeft) > 1))) {
+      return null;
+    }
+  }
+
   let bestScore = Number.NEGATIVE_INFINITY;
   let bestMove: Card[] | null = null;
 
@@ -229,6 +278,14 @@ export const findAutoMove = (
     if (mateLeft > 0 && mateLeft <= SUPPORT_THRESHOLD) {
       moveScore += TEAM_SUPPORT_BONUS;
       if (move.length > 1) moveScore += 0.4;
+
+      if (ctx && lastHand) {
+        const me = ctx.players[ctx.playerId];
+        const lastPlayer = ctx.players[lastHand.playerId];
+        if (me && lastPlayer && me.team === lastPlayer.team && me.id !== lastPlayer.id && move.some(isTrumpCard)) {
+          moveScore -= 2;
+        }
+      }
     }
 
     if (moveScore > bestScore) {
