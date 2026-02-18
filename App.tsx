@@ -125,6 +125,11 @@ const App: React.FC = () => {
   const [myPlayerId, setMyPlayerId] = useState<number>(0); 
   const botIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onlineAutoActionRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gameStateRef = useRef(gameState);
+
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   // --- Initialization & Persistence ---
   
@@ -623,6 +628,11 @@ ${url}
     if (thinkMs > 0) {
         await new Promise(resolve => setTimeout(resolve, thinkMs));
     }
+
+    const latest = gameStateRef.current;
+    if (latest.gameStatus !== 'playing' || latest.currentTurnIndex !== currentTurnIndex) {
+      return;
+    }
     
     // Check if it's a "free turn" (passCount reached limit or no history)
     // passCount limit calculation: 
@@ -653,7 +663,30 @@ ${url}
   const playCards = (playerId: number, cards: Card[]) => {
     const handAnalysis = analyzeHand(cards);
     setGameState(prev => {
+      if (prev.gameStatus !== 'playing' || prev.currentTurnIndex !== playerId || cards.length === 0) {
+        return prev;
+      }
+
       const player = prev.players[playerId];
+      const ownCardIds = new Set(player.hand.map(c => c.id));
+      if (!cards.every(card => ownCardIds.has(card.id))) {
+        return prev;
+      }
+
+      const activePlayersCount = prev.players.filter(p => !p.isFinished).length;
+      let threshold = activePlayersCount - 1;
+      if (prev.handHistory.length > 0) {
+        const lastHandPlayerId = prev.handHistory[prev.handHistory.length - 1].playerId;
+        if (prev.players[lastHandPlayerId].isFinished) {
+          threshold = activePlayersCount;
+        }
+      }
+      const isFreeTurn = prev.handHistory.length === 0 || prev.passCount >= threshold;
+      const effectiveLastHand = isFreeTurn ? null : prev.handHistory[prev.handHistory.length - 1];
+      if (effectiveLastHand && !canBeat(cards, effectiveLastHand)) {
+        return prev;
+      }
+
       const newHand = player.hand.filter(c => !cards.find(pc => pc.id === c.id));
       const isFinished = newHand.length === 0;
       let newWinners = [...prev.winners];
@@ -701,16 +734,32 @@ ${url}
 
   const passTurn = (playerId: number) => {
     setGameState(prev => {
+      if (prev.gameStatus !== 'playing' || prev.currentTurnIndex !== playerId) {
+        return prev;
+      }
+
+      const activePlayersCount = prev.players.filter(p => !p.isFinished).length;
+      let threshold = activePlayersCount - 1;
+
+      if (prev.handHistory.length > 0) {
+        const lastHandPlayerId = prev.handHistory[prev.handHistory.length - 1].playerId;
+        if (prev.players[lastHandPlayerId].isFinished) {
+          threshold = activePlayersCount;
+        }
+      }
+
+      const isFreeTurn = prev.handHistory.length === 0 || prev.passCount >= threshold;
+      if (isFreeTurn) {
+        return prev;
+      }
+
       const newPassCount = prev.passCount + 1;
       let logs = [`${prev.players[playerId].name} 不出`, ...prev.logs].slice(0, 50);
       let newHistory = prev.handHistory;
       
-      // Calculate active players to determine if round is over
-      const activePlayersCount = prev.players.filter(p => !p.isFinished).length;
-      
       // Determine Threshold for "Round Over"
       // Default: ActivePlayers - 1 (Everyone else passed)
-      let threshold = activePlayersCount - 1;
+      threshold = activePlayersCount - 1;
       let lastHandOwnerFinished = false;
 
       if (prev.handHistory.length > 0) {
