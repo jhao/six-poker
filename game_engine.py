@@ -234,9 +234,10 @@ def _opponent_cards_left(room: Room, seat_id: int) -> List[int]:
 
 
 def _evaluate_lead(move: List[Card], hand: List[Card], turn_history: Dict[int, Dict[str, int]]) -> float:
-    lead_strength_weight = 1.6
+    lead_strength_weight = -0.9
+    endgame_strength_weight = 1.1
     hand_cost_weight = 0.45
-    high_impact_bonus = 2.4
+    high_impact_bonus = 0.6
     record_bonus = 0.0
 
     t, _ = _analyze(move)
@@ -247,9 +248,18 @@ def _evaluate_lead(move: List[Card], hand: List[Card], turn_history: Dict[int, D
 
     score = 0.0
     score += _card_strength(move) * lead_strength_weight
+    if len(hand) <= 3:
+        # 收尾阶段需要控节奏，允许用较大牌尽快清手。
+        score += _card_strength(move) * endgame_strength_weight
     score -= _remaining_hand_cost(move, hand) * hand_cost_weight
-    if _is_high_impact_card(move):
+    if _is_high_impact_card(move) and len(hand) <= 4:
         score += high_impact_bonus
+    elif _is_high_impact_card(move):
+        # 前中期尽量不主动甩主牌/高牌，避免手里囤积小牌。
+        score -= 2.2
+
+    if any(c.value >= RANK_VALUES["A"] for c in move) and len(hand) > 3:
+        score -= 1.4
     # 主牌尽量后置，除非主牌很多可抢头游。
     trump_ratio = _trump_ratio(hand)
     if any(_is_trump_card(c) for c in move):
