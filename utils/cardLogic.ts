@@ -198,14 +198,28 @@ const opponentCardsLeft = (ctx: AutoMoveContext): number[] => {
 };
 
 const evaluateLead = (move: Card[], hand: Card[], ctx?: AutoMoveContext): number => {
-  const LEAD_STRENGTH_WEIGHT = 1.6;
+  const LEAD_STRENGTH_WEIGHT = -0.9;
+  const ENDGAME_STRENGTH_WEIGHT = 1.1;
   const HAND_COST_WEIGHT = 0.45;
-  const HIGH_IMPACT_BONUS = 2.2;
+  const HIGH_IMPACT_BONUS = 0.6;
 
   let score = 0;
   score += cardStrength(move) * LEAD_STRENGTH_WEIGHT;
+  if (hand.length <= 3) {
+    // 收尾阶段允许用较大牌抢节奏，避免错失清手窗口。
+    score += cardStrength(move) * ENDGAME_STRENGTH_WEIGHT;
+  }
   score -= remainingHandCost(move, hand) * HAND_COST_WEIGHT;
-  if (isHighImpactCard(move)) score += HIGH_IMPACT_BONUS;
+  if (isHighImpactCard(move) && hand.length <= 4) {
+    score += HIGH_IMPACT_BONUS;
+  } else if (isHighImpactCard(move)) {
+    // 前中期尽量不主动甩主牌/高牌，避免小牌压仓。
+    score -= 2.2;
+  }
+
+  if (move.some(c => c.value >= RANK_VALUES['A']) && hand.length > 3) {
+    score -= 1.4;
+  }
 
   const ratio = trumpRatio(hand);
   if (move.some(isTrumpCard)) score -= ratio < 0.45 ? 3 : 0.8;
