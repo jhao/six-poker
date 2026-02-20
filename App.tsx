@@ -76,10 +76,13 @@ const toLocalCard = (c: BackendCard): Card => {
 const App: React.FC = () => {
   const API_BASE_URL = (() => {
     const rawBase = (import.meta.env.VITE_API_BASE_URL || '').trim();
-    if (!rawBase) {
-      return 'http://47.93.33.214:81';
+    if (rawBase) {
+      return rawBase.replace(/\/$/, '');
     }
-    return rawBase.replace(/\/$/, '');
+
+    return window.location.protocol === 'https:'
+      ? 'https://47.93.33.214:82'
+      : 'http://47.93.33.214:81';
   })();
 
   // Navigation State
